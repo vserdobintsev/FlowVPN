@@ -50,10 +50,10 @@ internal sealed partial class FluentWindow
     {
         try
         {
-            using var verifiedCore = await Task.Run(CoreIntegrity.Acquire, windowLifetime.Token);
-            var start = new ProcessStartInfo(Store.Bin) { UseShellExecute = false, CreateNoWindow = true, RedirectStandardOutput = true, RedirectStandardError = true };
+            var start = new ProcessStartInfo { UseShellExecute = false, CreateNoWindow = true, RedirectStandardOutput = true, RedirectStandardError = true };
             start.ArgumentList.Add("version");
-            using var process = Process.Start(start)!;
+            using var verifiedCore = await Task.Run(() => CoreIntegrity.Start(start), windowLifetime.Token);
+            var process = verifiedCore.Process;
             using var timeout = CancellationTokenSource.CreateLinkedTokenSource(windowLifetime.Token);
             timeout.CancelAfter(TimeSpan.FromSeconds(5));
             var stderr = process.StandardError.ReadToEndAsync(timeout.Token);

@@ -28,6 +28,8 @@
 
 Включаются Dependabot alerts и security updates, secret scanning, push protection и Private Vulnerability Reporting. Обновления GitHub Actions поступают отдельными PR через Dependabot; автоматического слияния нет. NuGet остаётся под locked restore и NuGet audit: обновление требует пересоздания lock-файла и проверки совместимости.
 
+CodeQL включён в GitHub через **default setup**: язык C#, набор **Extended** (`extended` в API), модель угроз **`remote_and_local`**, еженедельный запуск. Его конфигурация хранится в настройках сервиса, поэтому отдельного CodeQL YAML в `.github/workflows` нет. Это не означает, что анализ выключен. Скрипт `Configure-Repository.ps1` не заменяет настройку CodeQL; при переносе проекта в другой репозиторий её необходимо включить и проверить отдельно. Снимок первого анализа и правила разбора результатов — в [SECURITY-REVIEW.md](SECURITY-REVIEW.md).
+
 Environment `release` требует ручного разрешения владельца и допускает запуск только из основной ветки `main` по явной branch policy. Workflow запускается из `main`, а тег нужного выпуска указывается параметром. Собственное одобрение разрешено для единственного сопровождающего. Секреты `PFX_BASE64` и `PFX_PASSWORD` добавляются отдельно; скрипт их не читает и не загружает. [Порядок выпуска](RELEASING.md).
 
 Issues используются для воспроизводимых ошибок и предложений, Discussions — для вопросов. Wiki и отдельные GitHub Projects выключены: документация и её история находятся рядом с кодом.

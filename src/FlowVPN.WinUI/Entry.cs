@@ -8,6 +8,30 @@ namespace FlowVPN;
 internal static class Entry
 {
     public static bool Preview, VisualTest, ReleaseUiTest, VerificationFailed, Startup, ConnectSelected;
+    internal static void ConfigureRoot(string[] args)
+    {
+        int root = Array.IndexOf(args, "--root");
+#if FLOWVPN_PACKAGE
+        if (root >= 0)
+            throw new ArgumentException("Установленная версия использует только свой каталог MSIX; параметр --root недоступен.");
+#else
+        if (root >= 0)
+        {
+            if (root + 1 >= args.Length)
+                throw new ArgumentException("Не указан каталог --root.");
+            Store.Root = Path.GetFullPath(args[root + 1]);
+        }
+#endif
+    }
+    internal static string[] ElevationArguments(int parentId, string userSid)
+    {
+        string[] handoff = ["--connect-selected", "--handoff-parent", parentId.ToString(System.Globalization.CultureInfo.InvariantCulture), "--handoff-user-sid", userSid];
+#if FLOWVPN_PACKAGE
+        return handoff;
+#else
+        return ["--root", Store.Root, .. handoff];
+#endif
+    }
     internal static void ValidateElevationIdentity(string? expectedSid, string currentSid)
     {
         if (expectedSid != null && !string.Equals(expectedSid, currentSid, StringComparison.Ordinal))
@@ -26,9 +50,7 @@ internal static class Entry
     {
         try
         {
-            int root = Array.IndexOf(args, "--root");
-            if (root >= 0 && root + 1 < args.Length)
-                Store.Root = Path.GetFullPath(args[root + 1]);
+            ConfigureRoot(args);
             VisualTest = args.Contains("--visual-test");
             ReleaseUiTest = args.Contains("--release-ui-test");
             Preview = args.Contains("--preview") || VisualTest || File.Exists(Path.Combine(Store.Root, "preview-only.flag"));

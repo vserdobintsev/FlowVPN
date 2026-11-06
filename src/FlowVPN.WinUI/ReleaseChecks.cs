@@ -50,6 +50,7 @@ internal static class ReleaseChecks
         }
         try
         {
+            CoreLaunchChecks.Run(Check);
             Entry.ValidateElevationIdentity(null, "S-1-5-21-1-2-3-1001");
             Check(true, "Ordinary startup does not require an elevation handoff");
             Entry.ValidateElevationIdentity("S-1-5-21-1-2-3-1001", "S-1-5-21-1-2-3-1001");
@@ -94,10 +95,11 @@ internal static class ReleaseChecks
             Check(RuleRepository.Due(), "Missing GeoIP cache requires refresh even with recent metadata");
             File.Delete(RuleRepository.MetaPath);
             File.WriteAllText(config, "{\"log\":{\"disabled\":true},\"dns\":{\"servers\":[{\"type\":\"udp\",\"tag\":\"dns-direct\",\"server\":\"127.0.0.1\"}],\"final\":\"dns-direct\"},\"outbounds\":[{\"type\":\"direct\",\"tag\":\"direct\"}],\"route\":{\"final\":\"direct\"}}");
-            var start = new ProcessStartInfo(Store.Bin) { UseShellExecute = false, CreateNoWindow = true, RedirectStandardError = true };
+            var start = new ProcessStartInfo { UseShellExecute = false, CreateNoWindow = true, RedirectStandardError = true };
             foreach (string arg in new[] { "--disable-color", "run", "-c", config })
                 start.ArgumentList.Add(arg);
-            using var dnsProcess = Process.Start(start)!;
+            using var dnsCore = await Task.Run(() => CoreIntegrity.Start(start));
+            var dnsProcess = dnsCore.Process;
             try
             {
                 await Task.Delay(1000);
@@ -111,10 +113,11 @@ internal static class ReleaseChecks
             try
             {
                 Store.WriteJson(config, runtimeConfig);
-                var info = new ProcessStartInfo(Store.Bin) { UseShellExecute = false, CreateNoWindow = false, WindowStyle = ProcessWindowStyle.Hidden, RedirectStandardError = true, RedirectStandardOutput = true };
+                var info = new ProcessStartInfo { UseShellExecute = false, CreateNoWindow = false, WindowStyle = ProcessWindowStyle.Hidden, RedirectStandardError = true, RedirectStandardOutput = true };
                 foreach (var a in new[] { "--disable-color", "run", "-c", config })
                     info.ArgumentList.Add(a);
-                using var process = Process.Start(info)!;
+                using var core = await Task.Run(() => CoreIntegrity.Start(info));
+                var process = core.Process;
                 await Task.Delay(800);
                 Check(!process.HasExited, "Hidden core starts");
                 await Native.Stop(process);
@@ -124,10 +127,11 @@ internal static class ReleaseChecks
             try
             {
                 Store.WriteJson(config, runtimeConfig);
-                var info = new ProcessStartInfo(Store.Bin) { UseShellExecute = false, CreateNoWindow = true };
+                var info = new ProcessStartInfo { UseShellExecute = false, CreateNoWindow = true };
                 foreach (var a in new[] { "--disable-color", "run", "-c", config })
                     info.ArgumentList.Add(a);
-                using var process = Process.Start(info)!;
+                using var core = await Task.Run(() => CoreIntegrity.Start(info));
+                var process = core.Process;
                 using (var job = new CoreJob(process))
                 {
                     await Task.Delay(500);

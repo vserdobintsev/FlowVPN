@@ -20,9 +20,9 @@ $packageVersion = [version]$manifest.Package.Identity.Version
 & $dotnet build (Join-Path $PSScriptRoot 'FlowVPN.WinUI.csproj') -c Release --nologo --configfile (Join-Path $PSScriptRoot 'NuGet.Config') -v quiet
 if ($LASTEXITCODE -ne 0) { throw 'Release validation build failed' }
 $testRoot = Join-Path $workspace ('work\release-checks\' + [guid]::NewGuid().ToString('N'))
-New-Item -ItemType Directory -Path (Join-Path $testRoot 'core') -Force | Out-Null
-Get-ChildItem -LiteralPath (Join-Path $workspace 'outputs\FlowVPN\core') | Copy-Item -Destination (Join-Path $testRoot 'core') -Force
+New-Item -ItemType Directory -Path $testRoot -Force | Out-Null
 $testExe = Join-Path $PSScriptRoot 'bin\Release\net10.0-windows10.0.26100.0\win-x64\FlowVPN.exe'
+& (Join-Path $PSScriptRoot 'Distribution\Test-CoreLock.ps1') -CoreDirectory (Join-Path (Split-Path -Parent $testExe) 'core')
 $start = [Diagnostics.ProcessStartInfo]::new($testExe)
 $start.UseShellExecute=$false;$start.CreateNoWindow=$true
 $start.ArgumentList.Add('--release-self-test');$start.ArgumentList.Add('--root');$start.ArgumentList.Add($testRoot)

@@ -9,9 +9,8 @@ public static class Importers
     static readonly TimeSpan ParseTimeout = TimeSpan.FromMilliseconds(250);
     static string ReadMaterial(string path)
     {
-        string full = Path.GetFullPath(path);
-        if (new Uri(full).IsUnc || new DriveInfo(Path.GetPathRoot(full)!).DriveType == DriveType.Network)
-            throw new InvalidDataException("Импортируйте профиль и ключи из локальной папки.");
+        if (!LocalPathPolicy.TryFile(path, out string full))
+            throw new InvalidDataException("Импортируйте профиль и ключи из существующих локальных файлов. Сетевые пути и ссылки на них не поддерживаются.");
         using var stream = new FileStream(full, FileMode.Open, FileAccess.Read, FileShare.Read);
         if (stream.Length > 4 * 1024 * 1024)
             throw new InvalidDataException("Файл OpenVPN больше допустимого размера.");
@@ -181,9 +180,11 @@ public static class Importers
         int count = 0;
         var notes = new List<string>();
         var roaming = Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData);
-        string ovpn = Path.Combine(roaming, "OpenVPN Connect", "profiles");
-        if (Directory.Exists(ovpn))
-            foreach (var f in Directory.GetFiles(ovpn, "*.ovpn"))
+        if (!LocalPathPolicy.TryDirectory(roaming, out string localRoaming, allowLocalLinks: false))
+            return (0, ["Папка данных клиентов недоступна для безопасного локального импорта."]);
+        string ovpn = Path.Combine(localRoaming, "OpenVPN Connect", "profiles");
+        if (LocalPathPolicy.TryDirectory(ovpn, out string localOpenVpn, allowLocalLinks: false))
+            foreach (var f in Directory.EnumerateFiles(localOpenVpn, "*.ovpn", new EnumerationOptions { IgnoreInaccessible = true, AttributesToSkip = FileAttributes.ReparsePoint }))
             {
                 try
                 {
@@ -192,11 +193,11 @@ public static class Importers
                 }
                 catch (Exception e) { notes.Add(Path.GetFileName(f) + ": " + e.Message); }
             }
-        var outline = Path.Combine(roaming, "Outline", "Local Storage", "leveldb");
-        if (Directory.Exists(outline))
+        var outline = Path.Combine(localRoaming, "Outline", "Local Storage", "leveldb");
+        if (LocalPathPolicy.TryDirectory(outline, out string localOutline, allowLocalLinks: false))
             try
             {
-                var keys = LevelStore.ServerValues(outline).SelectMany(s => Keys(JsonNode.Parse(s))).ToList();
+                var keys = LevelStore.ServerValues(localOutline).SelectMany(s => Keys(JsonNode.Parse(s))).ToList();
                 foreach (var entry in keys)
                     try
                     {
