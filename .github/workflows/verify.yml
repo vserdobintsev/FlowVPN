@@ -1,0 +1,60 @@
+name: Проверка сборки
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: verify-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+env:
+  DOTNET_CLI_TELEMETRY_OPTOUT: '1'
+  DOTNET_GENERATE_ASPNET_CERTIFICATE: 'false'
+  DOTNET_CLI_HOME: ${{ github.workspace }}/work/desktop-build/cli
+  NUGET_PACKAGES: ${{ github.workspace }}/work/desktop-build/packages
+  RestoreLockedMode: 'true'
+jobs:
+  verify:
+    name: Build (${{ matrix.mode }})
+    runs-on: windows-2025
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        mode: [Release, Preview]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-dotnet@0f4a354dd5547a28c70b7853dbd95d5b67886e73 # v6.1.0
+        with:
+          global-json-file: global.json
+          cache: true
+          cache-dependency-path: src/FlowVPN.WinUI/packages.lock.json
+      - name: Проверить исходники и документацию
+        shell: pwsh
+        run: ./tools/Test-Repository.ps1
+      - name: Восстановить закреплённые зависимости
+        run: dotnet restore ./src/FlowVPN.WinUI/FlowVPN.WinUI.csproj --locked-mode
+      - name: Подготовить закреплённый движок
+        shell: pwsh
+        run: ./src/FlowVPN.WinUI/Distribution/Get-PinnedCore.ps1 -Destination ./outputs/FlowVPN/core
+      - name: Собрать и проверить MSIX без подключения VPN
+        shell: pwsh
+        env:
+          BUILD_MODE: ${{ matrix.mode }}
+        run: |
+          $options=@{Unsigned=$true}
+          if($env:BUILD_MODE -eq 'Preview'){$options.Preview=$true}
+          ./src/FlowVPN.WinUI/Build-MSIX.ps1 @options
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: FlowVPN-${{ matrix.mode }}-verification
+          path: |
+            outputs/FlowVPN-MSIX/*-unsigned.msix
+            outputs/FlowVPN-MSIX/*-tests.json
+            outputs/FlowVPN-MSIX/*-checks.json
+          if-no-files-found: error
+          retention-days: 3

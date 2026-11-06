@@ -1,0 +1,35 @@
+name: Предложение улучшения
+description: Описать задачу, которую FlowVPN пока не решает или решает неудобно.
+labels: [enhancement]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Пользовательская задача
+      description: Что вы пытаетесь сделать? В какой ситуации существующего поведения недостаточно?
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Предлагаемое поведение
+      description: Как должен выглядеть результат для пользователя? Детали реализации необязательны.
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Альтернативы
+      description: Какие способы уже пробовали? Можно ли решить задачу существующими настройками?
+  - type: textarea
+    id: context
+    attributes:
+      label: Примеры и ограничения
+      description: Необязательно. Версия Windows, обезличенные схемы или снимки. Не прикладывайте рабочие VPN-конфигурации и ключи.
+  - type: checkboxes
+    id: duplicates
+    attributes:
+      label: Перед отправкой
+      options:
+        - label: Я проверил похожие предложения и не включил в сообщение личные данные или секреты.
+          required: true

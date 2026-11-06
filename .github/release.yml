@@ -1,0 +1,18 @@
+changelog:
+  exclude:
+    labels: [skip-changelog]
+  categories:
+    - title: Безопасность
+      labels: [security]
+    - title: Возможности
+      labels: [enhancement]
+    - title: Исправления
+      labels: [bug]
+    - title: Производительность
+      labels: [performance]
+    - title: Документация
+      labels: [documentation]
+    - title: Зависимости и сборка
+      labels: [dependencies, build, ci]
+    - title: Другие изменения
+      labels: ['*']

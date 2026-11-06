@@ -1,0 +1,14 @@
+[
+  { "name": "bug", "color": "d73a4a", "description": "Ошибка в работе приложения" },
+  { "name": "enhancement", "color": "0e8a16", "description": "Новая возможность или улучшение поведения" },
+  { "name": "documentation", "color": "0075ca", "description": "Документация и примеры" },
+  { "name": "security", "color": "b60205", "description": "Публично раскрытое исправление безопасности" },
+  { "name": "performance", "color": "5319e7", "description": "Скорость работы, память и использование ресурсов" },
+  { "name": "ui", "color": "a2eeef", "description": "Интерфейс, доступность и поведение Windows" },
+  { "name": "build", "color": "7057ff", "description": "Сборка, упаковка MSIX и выпуск" },
+  { "name": "ci", "color": "1d76db", "description": "GitHub Actions и автоматические проверки" },
+  { "name": "dependencies", "color": "0366d6", "description": "Зависимости приложения и инструменты сборки" },
+  { "name": "question", "color": "d876e3", "description": "Вопрос, требующий уточнения" },
+  { "name": "needs-triage", "color": "ededed", "description": "Нужно воспроизвести и классифицировать обращение" },
+  { "name": "skip-changelog", "color": "cfd3d7", "description": "Не включать технический PR в заметки о выпуске" }
+]

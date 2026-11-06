@@ -1,0 +1,70 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net10.0-windows10.0.26100.0</TargetFramework>
+    <TargetPlatformMinVersion>10.0.19041.0</TargetPlatformMinVersion>
+    <SupportedOSPlatformVersion>10.0.19041.0</SupportedOSPlatformVersion>
+    <RuntimeIdentifier>win-x64</RuntimeIdentifier>
+    <PlatformTarget>x64</PlatformTarget>
+    <UseWinUI>true</UseWinUI>
+    <WindowsPackageType>None</WindowsPackageType>
+    <WindowsAppSDKSelfContained>true</WindowsAppSDKSelfContained>
+    <SelfContained>true</SelfContained>
+    <EnableDefaultApplicationDefinition>false</EnableDefaultApplicationDefinition>
+    <EnableDefaultPageItems>false</EnableDefaultPageItems>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <RestorePackagesWithLockFile>true</RestorePackagesWithLockFile>
+    <NuGetAudit>true</NuGetAudit>
+    <NuGetAuditMode>all</NuGetAuditMode>
+    <WarningsAsErrors>$(WarningsAsErrors);NU1901;NU1902;NU1903;NU1904</WarningsAsErrors>
+    <AssemblyName>FlowVPN</AssemblyName>
+    <RootNamespace>FlowVPN</RootNamespace>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+    <ApplicationIcon>Assets/FlowVPN.ico</ApplicationIcon>
+    <DefineConstants>$(DefineConstants);DISABLE_XAML_GENERATED_MAIN</DefineConstants>
+    <Version>1.4.1</Version>
+    <FlowVPNPackageMode>Portable</FlowVPNPackageMode>
+    <Authors>Владислав Сердобинцев</Authors>
+    <PackageLicenseExpression>GPL-3.0-only</PackageLicenseExpression>
+    <PathMap>$([System.IO.Path]::GetFullPath('$(MSBuildProjectDirectory)\..'))=/_/src</PathMap>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)'=='MsixRelease' Or '$(Configuration)'=='MsixPreview'">
+    <WindowsPackageType>MSIX</WindowsPackageType>
+    <EnableMsixTooling>true</EnableMsixTooling>
+    <SelfContained>true</SelfContained>
+    <GenerateAppxPackageOnBuild>true</GenerateAppxPackageOnBuild>
+    <AppxPackageSigningEnabled>false</AppxPackageSigningEnabled>
+    <AppxBundle>Never</AppxBundle>
+    <UapAppxPackageBuildMode>SideloadOnly</UapAppxPackageBuildMode>
+    <DefineConstants>$(DefineConstants);FLOWVPN_PACKAGE</DefineConstants>
+    <Optimize>true</Optimize>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)'=='MsixRelease'">
+    <FlowVPNPackageMode>Release</FlowVPNPackageMode>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)'=='MsixPreview'">
+    <DefineConstants>$(DefineConstants);FLOWVPN_PACKAGE_PREVIEW</DefineConstants>
+    <FlowVPNPackageMode>Preview</FlowVPNPackageMode>
+  </PropertyGroup>
+  <ItemGroup Condition="'$(Configuration)'=='MsixRelease' Or '$(Configuration)'=='MsixPreview'">
+    <AppxManifest Include="Package.appxmanifest" Condition="'$(Configuration)'=='MsixRelease'" />
+    <AppxManifest Include="Package.Preview.appxmanifest" Condition="'$(Configuration)'=='MsixPreview'" />
+    <Content Include="Assets\*.png" />
+    <Content Include="../../outputs/FlowVPN/core/sing-box.exe;../../outputs/FlowVPN/core/libcronet.dll;../../outputs/FlowVPN/core/LICENSE" Link="core/%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+  <ItemGroup>
+    <AssemblyMetadata Include="FlowVPN.PackageMode" Value="$(FlowVPNPackageMode)" />
+    <Content Include="Assets/FlowVPN.ico" Link="FlowVPN.ico" CopyToOutputDirectory="PreserveNewest" />
+    <Content Include="UpdateChannels.json" CopyToOutputDirectory="PreserveNewest" />
+    <EmbeddedResource Include="engine.lock.json" />
+    <Content Include="LICENSE" Link="licenses/FlowVPN.txt" CopyToOutputDirectory="PreserveNewest" />
+    <Content Include="THIRD-PARTY-NOTICES.md" Link="licenses/THIRD-PARTY-NOTICES.md" CopyToOutputDirectory="PreserveNewest" />
+    <ApplicationDefinition Include="App.xaml" />
+    <FrameworkReference Include="Microsoft.WindowsDesktop.App.WindowsForms" />
+    <PackageReference Include="Microsoft.WindowsAppSDK" Version="2.6.5" />
+    <PackageReference Include="Microsoft.Windows.SDK.BuildTools" Version="10.0.26100.9457" />
+    <EmbeddedResource Include="Interface.xml" />
+    <EmbeddedResource Include="AppPresets.json" />
+  </ItemGroup>
+</Project>

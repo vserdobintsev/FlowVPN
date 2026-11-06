@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Package xmlns="http://schemas.microsoft.com/appx/manifest/foundation/windows10"
+ xmlns:uap="http://schemas.microsoft.com/appx/manifest/uap/windows10"
+ xmlns:uap5="http://schemas.microsoft.com/appx/manifest/uap/windows10/5"
+ xmlns:uap17="http://schemas.microsoft.com/appx/manifest/uap/windows10/17"
+ xmlns:rescap="http://schemas.microsoft.com/appx/manifest/foundation/windows10/restrictedcapabilities"
+ IgnorableNamespaces="uap uap5 uap17 rescap">
+ <Identity Name="FlowVPN.Preview" Publisher="CN=FlowVPN Development" Version="1.4.1.0" ProcessorArchitecture="x64" />
+ <Properties><DisplayName>FlowVPN Preview</DisplayName><PublisherDisplayName>Владислав Сердобинцев</PublisherDisplayName><Description>Предпросмотр интерфейса FlowVPN. Подключение VPN отключено.</Description><Logo>Assets\StoreLogo.png</Logo><uap17:UpdateWhileInUse>defer</uap17:UpdateWhileInUse></Properties>
+ <Dependencies><TargetDeviceFamily Name="Windows.Desktop" MinVersion="10.0.19041.0" MaxVersionTested="10.0.26100.0" /></Dependencies>
+ <Resources><Resource Language="ru-RU" /></Resources>
+ <Applications><Application Id="FlowVPN" Executable="FlowVPN.exe" EntryPoint="Windows.FullTrustApplication">
+  <uap:VisualElements DisplayName="FlowVPN Preview" Description="Настройка профилей и правил VPN — предпросмотр" Square150x150Logo="Assets\Square150x150Logo.png" Square44x44Logo="Assets\Square44x44Logo.png" BackgroundColor="transparent" />
+  <Extensions><uap5:Extension Category="windows.startupTask" Executable="FlowVPN.exe" EntryPoint="Windows.FullTrustApplication"><uap5:StartupTask TaskId="FlowVPNStartup" Enabled="false" DisplayName="FlowVPN Preview"/></uap5:Extension></Extensions>
+ </Application></Applications>
+ <Capabilities><rescap:Capability Name="runFullTrust" /></Capabilities>
+</Package>

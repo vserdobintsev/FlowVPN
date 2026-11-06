@@ -1,0 +1,34 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="360" viewBox="0 0 1280 360" role="img" aria-labelledby="title description">
+  <title id="title">FlowVPN</title>
+  <desc id="description">Ваш маршрут в интернете. Управление подключениями OpenVPN и Outline, приложениями и доменами в Windows.</desc>
+  <defs>
+    <linearGradient id="background" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#142b3b"/><stop offset="1" stop-color="#0c1925"/></linearGradient>
+    <linearGradient id="brand" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#22c5b5"/><stop offset="1" stop-color="#008e8a"/></linearGradient>
+    <linearGradient id="route" x1="0" y1="0" x2="1" y2="0"><stop stop-color="#1b5863"/><stop offset="0.5" stop-color="#41d0bf"/><stop offset="1" stop-color="#2c92b0"/></linearGradient>
+    <clipPath id="clip"><rect width="1280" height="360" rx="24"/></clipPath>
+  </defs>
+  <g clip-path="url(#clip)">
+    <rect width="1280" height="360" fill="url(#background)"/>
+    <circle cx="1120" cy="180" r="238" fill="#113342" opacity="0.45"/>
+    <circle cx="1120" cy="180" r="164" fill="none" stroke="#254957"/>
+    <circle cx="1120" cy="180" r="104" fill="none" stroke="#254957"/>
+    <g fill="none" stroke="url(#route)" stroke-width="3" stroke-linecap="round">
+      <path d="M746 86h74c74 0 80 94 153 94h185"/>
+      <path d="M746 180h412"/>
+      <path d="M746 274h74c74 0 80-94 153-94"/>
+      <path d="M1038 180c50 0 55-94 120-94h122"/>
+      <path d="M1038 180c50 0 55 94 120 94h122"/>
+    </g>
+    <g fill="#0e2432" stroke="#44cdbd" stroke-width="2"><circle cx="746" cy="86" r="8"/><circle cx="746" cy="180" r="8"/><circle cx="746" cy="274" r="8"/><circle cx="1158" cy="180" r="8"/></g>
+    <circle cx="1006" cy="180" r="24" fill="#102e3a" stroke="#64decd" stroke-width="2"/>
+    <path d="m996 180 7 7 14-15" fill="none" stroke="#7cebd8" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
+    <rect x="64" y="64" width="76" height="76" rx="23" fill="url(#brand)"/>
+    <path d="M89 84h31v8h-22v11h19v8h-19v13h-9z" fill="#fff"/>
+    <g font-family="Segoe UI, Arial, sans-serif">
+      <text x="164" y="122" fill="#f4fbff" font-size="54" font-weight="700" letter-spacing="-1.3">FlowVPN</text>
+      <text x="64" y="203" fill="#e4f2f6" font-size="29" font-weight="400">Ваш маршрут в интернете</text>
+      <text x="64" y="247" fill="#91aebc" font-size="20">Приложения · Домены · Профили</text>
+      <g fill="#c6e2e9" font-size="15" font-weight="600" letter-spacing="1.2"><text x="64" y="308">OPENVPN</text><text x="184" y="308">OUTLINE</text><text x="294" y="308">WINDOWS · WINUI 3</text></g>
+    </g>
+  </g>
+</svg>

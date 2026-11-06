@@ -1,0 +1,26 @@
+name: Уточнение документации
+description: Исправить ошибку или объяснить непонятный шаг в документации.
+labels: [documentation]
+body:
+  - type: input
+    id: location
+    attributes:
+      label: Страница или раздел
+      description: Укажите ссылку, имя файла или заголовок раздела.
+    validations:
+      required: true
+  - type: textarea
+    id: problem
+    attributes:
+      label: Что неясно или неверно
+      description: Опишите проблему и какой результат вы ожидали получить по инструкции.
+    validations:
+      required: true
+  - type: textarea
+    id: suggestion
+    attributes:
+      label: Предлагаемое уточнение
+      description: Необязательно. Если знаете верную формулировку или первичный источник, приложите их.
+  - type: markdown
+    attributes:
+      value: Не добавляйте личные пути, VPN-ключи и реальные конфигурации в примеры. Об уязвимости сообщайте по [SECURITY.md](https://github.com/vserdobintsev/FlowVPN/blob/main/SECURITY.md).

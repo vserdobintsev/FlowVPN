@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Возможная уязвимость
+    url: https://github.com/vserdobintsev/FlowVPN/blob/main/SECURITY.md
+    about: Как сообщить об уязвимости непублично, не раскрывая ключи и настройки.
+  - name: Установка и помощь
+    url: https://github.com/vserdobintsev/FlowVPN/blob/main/SUPPORT.md
+    about: Инструкции, известные ограничения и способы связи.

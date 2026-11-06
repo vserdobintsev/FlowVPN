@@ -1,0 +1,20 @@
+<Application
+ x:Class="FlowVPN.FluentApp"
+ xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+ xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+ xmlns:controls="using:Microsoft.UI.Xaml.Controls">
+ <Application.Resources>
+  <ResourceDictionary>
+   <ResourceDictionary.MergedDictionaries><controls:XamlControlsResources /></ResourceDictionary.MergedDictionaries>
+   <Color x:Key="SystemAccentColor">#007D76</Color>
+   <SolidColorBrush x:Key="AccentFillColorDefaultBrush" Color="#008879"/>
+   <SolidColorBrush x:Key="AccentFillColorSecondaryBrush" Color="#007C70"/>
+   <SolidColorBrush x:Key="AccentFillColorTertiaryBrush" Color="#00695F"/>
+   <SolidColorBrush x:Key="AccentTextFillColorPrimaryBrush" Color="#008879"/>
+   <SolidColorBrush x:Key="ListViewItemSelectionIndicatorBrush" Color="#23BEAA"/>
+   <SolidColorBrush x:Key="ToggleButtonBackgroundChecked" Color="#008879"/>
+   <SolidColorBrush x:Key="ToggleButtonForegroundChecked" Color="White"/>
+   <SolidColorBrush x:Key="ToggleSwitchFillOn" Color="#008879"/>
+  </ResourceDictionary>
+ </Application.Resources>
+</Application>

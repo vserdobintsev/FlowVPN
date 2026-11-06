@@ -1,0 +1,10 @@
+{
+  "Version": "1.14.4",
+  "Architecture": "x64",
+  "ArchiveUrl": "https://github.com/SagerNet/sing-box/releases/download/v1.14.4/sing-box-1.14.4-windows-amd64.zip",
+  "ArchiveSha256": "99185D75D314A07DBBA4A130C8AD986CBEB629A07927975636B341CA61F991DF",
+  "Files": {
+    "sing-box.exe": "8F30682EE198855440D2A7FE070D5D3653793B2D01BB8C85EEA88F93BBE7C8B9",
+    "libcronet.dll": "3217C6260FBCA5F16072E0B79735742F40109A63BB0FF88FD6B96DD6B54A2928"
+  }
+}

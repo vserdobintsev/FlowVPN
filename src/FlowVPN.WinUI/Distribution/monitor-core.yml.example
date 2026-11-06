@@ -1,0 +1,23 @@
+# Copy to .github/workflows to enable. No automatic dependency upgrade or code execution from releases.
+name: Review new sing-box versions
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '20 8 * * 1'
+permissions:
+  contents: read
+jobs:
+  check:
+    runs-on: windows-2025
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Compare upstream release with compatibility lock
+        shell: pwsh
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: ./src/FlowVPN.WinUI/Distribution/Watch-SingBox.ps1 -OutputFile ./sing-box-review.json
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: sing-box-review
+          path: sing-box-review.json
+          retention-days: 30

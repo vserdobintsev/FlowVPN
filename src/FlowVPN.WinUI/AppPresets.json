@@ -1,0 +1,494 @@
+[
+  {
+    "Id": "codex",
+    "Name": "Codex",
+    "Description": "Приложение, служба и встроенные инструменты",
+    "Components": [
+      {
+        "Name": "Приложение и служба",
+        "Package": "OpenAI.Codex",
+        "Executable": "Codex.exe"
+      },
+      {
+        "Name": "Движок и инструменты",
+        "Locations": [
+          "{LocalAppData}\\OpenAI\\Codex"
+        ],
+        "Role": "engine"
+      },
+      {
+        "Name": "Встроенные среды",
+        "Locations": [
+          "{UserProfile}\\.cache\\codex-runtimes"
+        ],
+        "Role": "engine"
+      }
+    ],
+    "ProfileIcon": "code",
+    "DefaultSelection": true
+  },
+  {
+    "Id": "telegram",
+    "Name": "Telegram",
+    "Description": "Приложение и его вспомогательные процессы",
+    "Components": [
+      {
+        "Name": "Telegram Desktop",
+        "Executable": "Telegram.exe",
+        "Locations": [
+          "{AppData}\\Telegram Desktop",
+          "{LocalAppData}\\Telegram Desktop",
+          "{ProgramFiles}\\Telegram Desktop",
+          "{ProgramFilesX86}\\Telegram Desktop"
+        ]
+      }
+    ],
+    "ProfileIcon": "chat",
+    "DefaultSelection": true
+  },
+  {
+    "Id": "yandex",
+    "Name": "Яндекс Браузер",
+    "Description": "Браузер и процессы внутри его папки",
+    "Components": [
+      {
+        "Name": "Браузер",
+        "Executable": "browser.exe",
+        "Locations": [
+          "{LocalAppData}\\Yandex\\YandexBrowser\\Application",
+          "{ProgramFiles}\\Yandex\\YandexBrowser\\Application",
+          "{ProgramFilesX86}\\Yandex\\YandexBrowser\\Application"
+        ],
+        "AppPath": "browser.exe",
+        "ProductContains": "Yandex"
+      }
+    ],
+    "ProfileIcon": "browser",
+    "CreateProfile": true
+  },
+  {
+    "Id": "chrome",
+    "Name": "Google Chrome",
+    "Description": "Браузер и процессы внутри его папки",
+    "Components": [
+      {
+        "Name": "Браузер",
+        "Executable": "chrome.exe",
+        "Locations": [
+          "{LocalAppData}\\Google\\Chrome\\Application",
+          "{ProgramFiles}\\Google\\Chrome\\Application",
+          "{ProgramFilesX86}\\Google\\Chrome\\Application"
+        ]
+      }
+    ],
+    "ProfileIcon": "browser"
+  },
+  {
+    "Id": "edge",
+    "Name": "Microsoft Edge",
+    "Description": "Браузер и процессы внутри его папки",
+    "Components": [
+      {
+        "Name": "Браузер",
+        "Executable": "msedge.exe",
+        "Locations": [
+          "{LocalAppData}\\Microsoft\\Edge\\Application",
+          "{ProgramFiles}\\Microsoft\\Edge\\Application",
+          "{ProgramFilesX86}\\Microsoft\\Edge\\Application"
+        ]
+      }
+    ],
+    "ProfileIcon": "browser"
+  },
+  {
+    "Id": "firefox",
+    "Name": "Mozilla Firefox",
+    "Description": "Браузер и процессы внутри его папки",
+    "Components": [
+      {
+        "Name": "Браузер",
+        "Executable": "firefox.exe",
+        "Locations": [
+          "{LocalAppData}\\Mozilla Firefox",
+          "{ProgramFiles}\\Mozilla Firefox",
+          "{ProgramFilesX86}\\Mozilla Firefox"
+        ]
+      }
+    ],
+    "ProfileIcon": "browser"
+  },
+  {
+    "Id": "kilo",
+    "Name": "Kilo Code",
+    "Description": "Настольное приложение и отдельный CLI. Расширения находятся внутри соответствующего приложения.",
+    "Components": [
+      {
+        "Name": "Настольное приложение",
+        "Executable": "Kilo.exe",
+        "Registration": "^Kilo(?: Code| Desktop)?(?:\\s|$)",
+        "Locations": [
+          "{LocalAppData}\\Programs\\Kilo",
+          "{LocalAppData}\\Programs\\Kilo Code",
+          "{ProgramFiles}\\Kilo"
+        ]
+      },
+      {
+        "Name": "Kilo CLI",
+        "Executable": "kilo.exe",
+        "FileOnly": true,
+        "Recursive": true,
+        "SearchPath": true,
+        "Locations": [
+          "{AppData}\\npm\\node_modules\\@kilocode",
+          "{UserProfile}\\.bun\\install\\global\\node_modules\\@kilocode",
+          "{UserProfile}\\.kilo\\bin",
+          "{UserProfile}\\scoop\\apps\\kilo\\current"
+        ],
+        "Role": "engine"
+      }
+    ],
+    "IconFiles": [],
+    "ProfileIcon": "code"
+  },
+  {
+    "Id": "opencode",
+    "Name": "OpenCode",
+    "Description": "Настольное приложение и отдельный CLI. Общий Node.js и терминал не добавляются.",
+    "Components": [
+      {
+        "Name": "Настольное приложение",
+        "Executable": "OpenCode.exe",
+        "Registration": "^OpenCode(?: Desktop|\\s+\\d)",
+        "Locations": [
+          "{LocalAppData}\\Programs\\@opencode-aidesktop",
+          "{LocalAppData}\\Programs\\OpenCode",
+          "{LocalAppData}\\OpenCode",
+          "{ProgramFiles}\\OpenCode"
+        ]
+      },
+      {
+        "Name": "OpenCode CLI",
+        "Executable": "opencode.exe",
+        "FileOnly": true,
+        "Recursive": true,
+        "SearchPath": true,
+        "Locations": [
+          "{AppData}\\npm\\node_modules\\opencode-ai",
+          "{AppData}\\npm\\node_modules\\@opencode",
+          "{UserProfile}\\.bun\\install\\global\\node_modules\\opencode-ai",
+          "{UserProfile}\\.bun\\install\\global\\node_modules\\@opencode",
+          "{UserProfile}\\.opencode\\bin",
+          "{UserProfile}\\scoop\\apps\\opencode\\current",
+          "{LocalAppData}\\Microsoft\\WinGet\\Packages\\SST.opencode_*",
+          "{LocalAppData}\\Microsoft\\WinGet\\Packages\\AnomalyCo.OpenCode_*"
+        ],
+        "Role": "engine"
+      }
+    ],
+    "ProfileIcon": "code"
+  },
+  {
+    "Id": "nvidia-app",
+    "Name": "NVIDIA App",
+    "Description": "Приложение, оверлей и общий NVIDIA Container. Контейнер может обслуживать другие функции NVIDIA.",
+    "Components": [
+      {
+        "Name": "Приложение, обновления и оверлей",
+        "Executable": "CEF\\NVIDIA App.exe",
+        "Locations": [
+          "{ProgramFiles}\\NVIDIA Corporation\\NVIDIA app",
+          "{ProgramFilesX86}\\NVIDIA Corporation\\NVIDIA app"
+        ]
+      },
+      {
+        "Name": "NVIDIA Container — общая служба NVIDIA",
+        "Executable": "nvcontainer.exe",
+        "FileOnly": true,
+        "RequiresAnyFile": [
+          "{ProgramFiles}\\NVIDIA Corporation\\NVIDIA app\\CEF\\NVIDIA App.exe",
+          "{ProgramFilesX86}\\NVIDIA Corporation\\NVIDIA app\\CEF\\NVIDIA App.exe"
+        ],
+        "Locations": [
+          "{ProgramFiles}\\NVIDIA Corporation\\NvContainer",
+          "{ProgramFilesX86}\\NVIDIA Corporation\\NvContainer"
+        ],
+        "Role": "shared-service",
+        "ScopeNote": "Этот EXE также обслуживает другие функции NVIDIA; правило охватывает все его экземпляры."
+      }
+    ],
+    "ProfileIcon": "game"
+  },
+  {
+    "Id": "vscode",
+    "Name": "VS Code",
+    "Description": "Общий трафик VS Code. Движки расширений выбираются отдельно.",
+    "LegacyGroupIds": [
+      "preset:kilo"
+    ],
+    "Components": [
+      {
+        "Name": "Основное приложение",
+        "Executable": "Code.exe",
+        "Registration": "^Microsoft Visual Studio Code(?! Insiders)",
+        "RequiresAnyFile": [],
+        "Locations": [
+          "{LocalAppData}\\Programs\\Microsoft VS Code",
+          "{ProgramFiles}\\Microsoft VS Code",
+          "{ProgramFilesX86}\\Microsoft VS Code"
+        ],
+        "Role": "application",
+        "Suggested": true,
+        "ScopeNote": "Включает общий трафик VS Code и расширений внутри его процесса. Отдельные движки расширений выбираются дополнительно."
+      }
+    ],
+    "ProfileIcon": "code"
+  },
+  {
+    "Id": "kilo-vscode",
+    "Name": "Kilo Code",
+    "ParentId": "vscode",
+    "Description": "Отдельный движок расширения Kilo Code",
+    "LegacyGroupIds": [
+      "preset:kilo"
+    ],
+    "Components": [
+      {
+        "Name": "Движок расширения Kilo Code",
+        "Executable": "kilo.exe",
+        "Role": "engine",
+        "Locations": [
+          "{UserProfile}\\.vscode\\extensions\\kilocode.kilo-code-*\\bin"
+        ],
+        "FileOnly": true
+      }
+    ],
+    "IconFiles": [
+      "{UserProfile}\\.vscode\\extensions\\kilocode.kilo-code-*\\assets\\icons\\logo-outline-black.png"
+    ],
+    "ProfileIcon": "code"
+  },
+  {
+    "Id": "codex-vscode",
+    "Name": "Codex",
+    "ParentId": "vscode",
+    "Description": "Движок Codex и его встроенные инструменты",
+    "Components": [
+      {
+        "Name": "Собственные процессы Codex",
+        "Executable": "codex.exe",
+        "Role": "engine",
+        "Locations": [
+          "{UserProfile}\\.vscode\\extensions\\openai.chatgpt-*\\bin\\windows-*"
+        ]
+      }
+    ],
+    "IconFiles": [
+      "{UserProfile}\\.vscode\\extensions\\openai.chatgpt-*\\resources\\blossom.dark.png"
+    ],
+    "ProfileIcon": "code"
+  },
+  {
+    "Id": "vscode-insiders",
+    "Name": "VS Code Insiders",
+    "Description": "Общий трафик VS Code Insiders. Движки расширений выбираются отдельно.",
+    "LegacyGroupIds": [
+      "preset:kilo"
+    ],
+    "Components": [
+      {
+        "Name": "Основное приложение",
+        "Executable": "Code - Insiders.exe",
+        "Registration": "^Microsoft Visual Studio Code Insiders",
+        "RequiresAnyFile": [],
+        "Locations": [
+          "{LocalAppData}\\Programs\\Microsoft VS Code Insiders",
+          "{ProgramFiles}\\Microsoft VS Code Insiders"
+        ],
+        "Role": "application",
+        "Suggested": true,
+        "ScopeNote": "Включает общий трафик VS Code Insiders и расширений внутри его процесса. Отдельные движки расширений выбираются дополнительно."
+      }
+    ],
+    "ProfileIcon": "code"
+  },
+  {
+    "Id": "kilo-vscode-insiders",
+    "Name": "Kilo Code",
+    "ParentId": "vscode-insiders",
+    "Description": "Отдельный движок расширения Kilo Code",
+    "LegacyGroupIds": [
+      "preset:kilo"
+    ],
+    "Components": [
+      {
+        "Name": "Движок расширения Kilo Code",
+        "Executable": "kilo.exe",
+        "Role": "engine",
+        "Locations": [
+          "{UserProfile}\\.vscode-insiders\\extensions\\kilocode.kilo-code-*\\bin"
+        ],
+        "FileOnly": true
+      }
+    ],
+    "IconFiles": [
+      "{UserProfile}\\.vscode-insiders\\extensions\\kilocode.kilo-code-*\\assets\\icons\\logo-outline-black.png"
+    ],
+    "ProfileIcon": "code"
+  },
+  {
+    "Id": "codex-vscode-insiders",
+    "Name": "Codex",
+    "ParentId": "vscode-insiders",
+    "Description": "Движок Codex и его встроенные инструменты",
+    "Components": [
+      {
+        "Name": "Собственные процессы Codex",
+        "Executable": "codex.exe",
+        "Role": "engine",
+        "Locations": [
+          "{UserProfile}\\.vscode-insiders\\extensions\\openai.chatgpt-*\\bin\\windows-*"
+        ]
+      }
+    ],
+    "IconFiles": [
+      "{UserProfile}\\.vscode-insiders\\extensions\\openai.chatgpt-*\\resources\\blossom.dark.png"
+    ],
+    "ProfileIcon": "code"
+  },
+  {
+    "Id": "cursor",
+    "Name": "Cursor",
+    "Description": "Общий трафик Cursor. Движки расширений выбираются отдельно.",
+    "LegacyGroupIds": [
+      "preset:kilo"
+    ],
+    "Components": [
+      {
+        "Name": "Основное приложение",
+        "Executable": "Cursor.exe",
+        "Registration": "^Cursor(?:\\s|$)",
+        "RequiresAnyFile": [],
+        "Locations": [
+          "{LocalAppData}\\Programs\\cursor",
+          "{ProgramFiles}\\Cursor"
+        ],
+        "Role": "application",
+        "Suggested": true,
+        "ScopeNote": "Включает общий трафик Cursor и расширений внутри его процесса. Отдельные движки расширений выбираются дополнительно."
+      }
+    ],
+    "ProfileIcon": "code"
+  },
+  {
+    "Id": "kilo-cursor",
+    "Name": "Kilo Code",
+    "ParentId": "cursor",
+    "Description": "Отдельный движок расширения Kilo Code",
+    "LegacyGroupIds": [
+      "preset:kilo"
+    ],
+    "Components": [
+      {
+        "Name": "Движок расширения Kilo Code",
+        "Executable": "kilo.exe",
+        "Role": "engine",
+        "Locations": [
+          "{UserProfile}\\.cursor\\extensions\\kilocode.kilo-code-*\\bin"
+        ],
+        "FileOnly": true
+      }
+    ],
+    "IconFiles": [
+      "{UserProfile}\\.cursor\\extensions\\kilocode.kilo-code-*\\assets\\icons\\logo-outline-black.png"
+    ],
+    "ProfileIcon": "code"
+  },
+  {
+    "Id": "codex-cursor",
+    "Name": "Codex",
+    "ParentId": "cursor",
+    "Description": "Движок Codex и его встроенные инструменты",
+    "Components": [
+      {
+        "Name": "Собственные процессы Codex",
+        "Executable": "codex.exe",
+        "Role": "engine",
+        "Locations": [
+          "{UserProfile}\\.cursor\\extensions\\openai.chatgpt-*\\bin\\windows-*"
+        ]
+      }
+    ],
+    "IconFiles": [
+      "{UserProfile}\\.cursor\\extensions\\openai.chatgpt-*\\resources\\blossom.dark.png"
+    ],
+    "ProfileIcon": "code"
+  },
+  {
+    "Id": "windsurf",
+    "Name": "Windsurf",
+    "Description": "Общий трафик Windsurf. Движки расширений выбираются отдельно.",
+    "LegacyGroupIds": [
+      "preset:kilo"
+    ],
+    "Components": [
+      {
+        "Name": "Основное приложение",
+        "Executable": "Windsurf.exe",
+        "Registration": "^Windsurf(?:\\s|$)",
+        "RequiresAnyFile": [],
+        "Locations": [
+          "{LocalAppData}\\Programs\\Windsurf",
+          "{ProgramFiles}\\Windsurf"
+        ],
+        "Role": "application",
+        "Suggested": true,
+        "ScopeNote": "Включает общий трафик Windsurf и расширений внутри его процесса. Отдельные движки расширений выбираются дополнительно."
+      }
+    ],
+    "ProfileIcon": "code"
+  },
+  {
+    "Id": "kilo-windsurf",
+    "Name": "Kilo Code",
+    "ParentId": "windsurf",
+    "Description": "Отдельный движок расширения Kilo Code",
+    "LegacyGroupIds": [
+      "preset:kilo"
+    ],
+    "Components": [
+      {
+        "Name": "Движок расширения Kilo Code",
+        "Executable": "kilo.exe",
+        "Role": "engine",
+        "Locations": [
+          "{UserProfile}\\.windsurf\\extensions\\kilocode.kilo-code-*\\bin"
+        ],
+        "FileOnly": true
+      }
+    ],
+    "IconFiles": [
+      "{UserProfile}\\.windsurf\\extensions\\kilocode.kilo-code-*\\assets\\icons\\logo-outline-black.png"
+    ],
+    "ProfileIcon": "code"
+  },
+  {
+    "Id": "codex-windsurf",
+    "Name": "Codex",
+    "ParentId": "windsurf",
+    "Description": "Движок Codex и его встроенные инструменты",
+    "Components": [
+      {
+        "Name": "Собственные процессы Codex",
+        "Executable": "codex.exe",
+        "Role": "engine",
+        "Locations": [
+          "{UserProfile}\\.windsurf\\extensions\\openai.chatgpt-*\\bin\\windows-*"
+        ]
+      }
+    ],
+    "IconFiles": [
+      "{UserProfile}\\.windsurf\\extensions\\openai.chatgpt-*\\resources\\blossom.dark.png"
+    ],
+    "ProfileIcon": "code"
+  }
+]

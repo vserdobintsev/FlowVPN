@@ -1,0 +1,39 @@
+name: Аудит зависимостей NuGet
+on:
+  workflow_dispatch:
+  schedule:
+    # Weekly check on the default branch, also when no code changes are made.
+    - cron: '35 6 * * 1'
+permissions:
+  contents: read
+concurrency:
+  group: dependency-audit-${{ github.ref }}
+  cancel-in-progress: true
+env:
+  DOTNET_CLI_TELEMETRY_OPTOUT: '1'
+  DOTNET_GENERATE_ASPNET_CERTIFICATE: 'false'
+  DOTNET_CLI_HOME: ${{ github.workspace }}/work/desktop-build/cli
+  NUGET_PACKAGES: ${{ github.workspace }}/work/desktop-build/packages
+jobs:
+  audit:
+    name: NuGet audit
+    runs-on: windows-2025
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-dotnet@0f4a354dd5547a28c70b7853dbd95d5b67886e73 # v6.1.0
+        with:
+          global-json-file: global.json
+          cache: true
+          cache-dependency-path: src/FlowVPN.WinUI/packages.lock.json
+      - name: Проверить закреплённые прямые и транзитивные зависимости
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          dotnet restore ./src/FlowVPN.WinUI/FlowVPN.WinUI.csproj --locked-mode --force `
+            -p:NuGetAudit=true -p:NuGetAuditMode=all -p:NuGetAuditLevel=low `
+            '-p:WarningsAsErrors=NU1901%3BNU1902%3BNU1903%3BNU1904%3BNU1900%3BNU1905'
+          if ($LASTEXITCODE -ne 0) { throw 'Аудит NuGet не пройден. Проверьте уязвимости и доступность источника аудита в журнале restore.' }
+          'Проверка NuGet завершена. Пакеты закреплены lock-файлом; sing-box, libcronet и остальные внешние бинарники требуют отдельного аудита.' >> $env:GITHUB_STEP_SUMMARY

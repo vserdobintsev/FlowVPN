@@ -1,0 +1,7 @@
+{
+  "SchemaVersion": 1,
+  "Channels": [
+    { "Id": "stable", "Name": "Стабильный", "PackageName": "FlowVPN", "FeedUrl": "" },
+    { "Id": "preview", "Name": "Предварительный", "PackageName": "FlowVPN.Preview", "FeedUrl": "" }
+  ]
+}
