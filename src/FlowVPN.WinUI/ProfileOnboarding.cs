@@ -66,6 +66,7 @@ internal sealed partial class FluentWindow
                 source.SelectedIndex = 0;
 
             var cards = new Grid { ColumnSpacing = 12, RowSpacing = 12 };
+            ApplyProfileCardColors(cards);
             var choices = new List<(ProfileSuggestion Suggestion, ToggleButton Button)>();
             ContentDialog? activeDialog = null;
             bool submitting = false, dialogClosing = false;
@@ -77,6 +78,7 @@ internal sealed partial class FluentWindow
                 int count = choices.Count(choice => choice.Button.IsChecked == true);
                 activeDialog.PrimaryButtonText = submitting ? "Создание…" : count == 1 ? "Создать профиль" : $"Создать профили · {count}";
                 activeDialog.IsPrimaryButtonEnabled = !submitting && count > 0 && source.SelectedItem != null;
+                activeDialog.DefaultButton = count > 0 && source.SelectedItem != null ? ContentDialogButton.Primary : ContentDialogButton.Close;
             }
             foreach (var suggestion in suggestions)
             {
@@ -249,6 +251,8 @@ internal sealed partial class FluentWindow
             if (response == ContentDialogResult.Primary && creation is { } result)
             {
                 BindAll();
+                if (!onboarding && result.Added > 0)
+                    SelectPage(0);
                 feedback.Title = result.Added > 0 ? "Профили созданы" : "Новые профили не добавлены";
                 feedback.Message = result.SourceMissing ? "Подключение больше недоступно. Добавьте его и повторите выбор."
                     : $"Создано: {result.Added}. Уже существуют: {result.Duplicates}."
@@ -256,8 +260,6 @@ internal sealed partial class FluentWindow
                         + (result.Added > 0 ? " Выберите профиль слева, чтобы настроить или подключить его." : "");
                 feedback.Severity = result.SourceMissing || result.Unavailable > 0 ? InfoBarSeverity.Warning : result.Added > 0 ? InfoBarSeverity.Success : InfoBarSeverity.Informational;
                 feedback.IsOpen = true;
-                if (!onboarding && result.Added > 0)
-                    SelectPage(0);
             }
             else
             {
@@ -339,5 +341,34 @@ internal sealed partial class FluentWindow
         button.Checked += (_, _) => selected.Opacity = 1;
         button.Unchecked += (_, _) => selected.Opacity = 0;
         return button;
+    }
+
+    static void ApplyProfileCardColors(FrameworkElement host)
+    {
+        // Scope all checked states together; application-wide overrides cover only the resting state.
+        foreach (string theme in new[] { "Default", "Light" })
+        {
+            var colors = new ResourceDictionary();
+            foreach (var (state, fill) in new[] { ("Checked", "Default"), ("CheckedPointerOver", "Secondary"), ("CheckedPressed", "Tertiary") })
+            {
+                colors["ToggleButtonBackground" + state] = Application.Current.Resources["AccentFillColor" + fill + "Brush"];
+                colors["ToggleButtonBorderBrush" + state] = Application.Current.Resources["AccentFillColor" + fill + "Brush"];
+                colors["ToggleButtonForeground" + state] = Application.Current.Resources["ToggleButtonForegroundChecked"];
+            }
+            host.Resources.ThemeDictionaries[theme] = colors;
+        }
+        host.Resources.ThemeDictionaries["HighContrast"] = (ResourceDictionary)Microsoft.UI.Xaml.Markup.XamlReader.Load("""
+            <ResourceDictionary xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+                <SolidColorBrush x:Key="ToggleButtonBackgroundChecked" Color="{ThemeResource SystemColorHighlightColor}"/>
+                <SolidColorBrush x:Key="ToggleButtonBackgroundCheckedPointerOver" Color="{ThemeResource SystemColorButtonTextColor}"/>
+                <SolidColorBrush x:Key="ToggleButtonBackgroundCheckedPressed" Color="{ThemeResource SystemColorHighlightTextColor}"/>
+                <SolidColorBrush x:Key="ToggleButtonForegroundChecked" Color="{ThemeResource SystemColorHighlightTextColor}"/>
+                <SolidColorBrush x:Key="ToggleButtonForegroundCheckedPointerOver" Color="{ThemeResource SystemColorButtonFaceColor}"/>
+                <SolidColorBrush x:Key="ToggleButtonForegroundCheckedPressed" Color="{ThemeResource SystemColorHighlightColor}"/>
+                <SolidColorBrush x:Key="ToggleButtonBorderBrushChecked" Color="{ThemeResource SystemColorHighlightColor}"/>
+                <SolidColorBrush x:Key="ToggleButtonBorderBrushCheckedPointerOver" Color="{ThemeResource SystemColorButtonTextColor}"/>
+                <SolidColorBrush x:Key="ToggleButtonBorderBrushCheckedPressed" Color="{ThemeResource SystemColorHighlightTextColor}"/>
+            </ResourceDictionary>
+            """);
     }
 }

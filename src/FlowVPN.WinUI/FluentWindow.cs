@@ -325,7 +325,7 @@ internal sealed partial class FluentWindow : Window
         C<ListView>("SourceList").MaxHeight = Math.Max(130, root.ActualHeight - 450);
         C<StackPanel>("SourceCommands").Orientation = root.ActualWidth - (compact ? 80 : 248) < 700 ? Orientation.Vertical : Orientation.Horizontal;
         C<TextBlock>("ProfileHeading").FontSize = root.ActualWidth < 900 ? 22 : 27;
-        C<Button>("ThemeButton").Content = compact ? "◐" : theme == 1 ? "☀  Светлая тема" : theme == 2 ? "◐  Тёмная тема" : "◐  Системная тема";
+        UpdateThemeButton();
         C<StackPanel>("SidebarFooter").Children[1].Visibility = compact ? Visibility.Collapsed : Visibility.Visible;
     }
     void Theme()
@@ -334,7 +334,16 @@ internal sealed partial class FluentWindow : Window
         settings.Appearance = theme;
         Store.Save(settings);
         root.RequestedTheme = theme == 1 ? ElementTheme.Light : theme == 2 ? ElementTheme.Dark : ElementTheme.Default;
-        C<Button>("ThemeButton").Content = theme == 1 ? "☀  Светлая тема" : theme == 2 ? "◐  Тёмная тема" : "◐  Системная тема";
+        UpdateThemeButton();
+    }
+    void UpdateThemeButton()
+    {
+        string label = theme switch { 1 => "Светлая тема", 2 => "Тёмная тема", _ => "Системная тема" };
+        string glyph = theme == 1 ? "☀" : "◐";
+        var button = C<Button>("ThemeButton");
+        button.Content = compact ? glyph : glyph + "  " + label;
+        ToolTipService.SetToolTip(button, label + " · сменить тему");
+        Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(button, "Сменить тему. Выбрана " + label.ToLowerInvariant());
     }
     async Task<string?> Prompt(string title, string label, string value = "", bool multiline = false, bool secret = false)
     {

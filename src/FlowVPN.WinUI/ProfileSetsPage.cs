@@ -52,6 +52,7 @@ internal sealed partial class FluentWindow
 
     void HookProfileSets()
     {
+        ApplyProfileCardColors(sets.Cards);
         var body = C<StackPanel>("ProfileSetsBody");
         body.Children.Add(new TextBlock { Text = "Наборы помогают собрать приложения для профиля. Выберите готовый вариант или создайте свой из нескольких наборов.", TextWrapping = TextWrapping.Wrap, Opacity = .8 });
         sets.Commands.Children.Add(sets.Compose);
@@ -286,7 +287,7 @@ internal sealed partial class FluentWindow
             if (button.Tag is FontIcon mark && sets.Composing)
                 mark.Opacity = button.IsChecked == true ? 1 : 0;
         }
-        sets.Selection.Text = sets.Composing ? $"Выбрано наборов: {sets.Selected.Count} · нужно не меньше двух" : "Выберите набор, чтобы посмотреть состав";
+        sets.Selection.Text = sets.Composing ? $"Выбрано наборов: {sets.Selected.Count}" + (sets.Selected.Count < 2 ? " · нужно не меньше двух" : "") : "Выберите набор, чтобы посмотреть состав";
     }
 
     void RefreshProfileSetResult()
@@ -294,7 +295,7 @@ internal sealed partial class FluentWindow
         sets.Composer.Visibility = sets.SaveForm.Visibility = sets.Composing ? Visibility.Visible : Visibility.Collapsed;
         var entry = sets.Entries.FirstOrDefault(item => item.Id == sets.ViewedId);
         sets.Title.Text = sets.Composing ? "Новый набор" : entry?.Name ?? "Состав набора";
-        sets.Description.Text = sets.Composing ? "Отметьте наборы слева. Результат обновляется сразу." : entry?.Description ?? "Выберите готовый набор.";
+        sets.Description.Text = sets.Composing ? "Отметьте несколько наборов. Результат обновляется сразу." : entry?.Description ?? "Выберите готовый набор.";
         sets.CustomActions.Visibility = !sets.Composing && entry?.IsCustom == true ? Visibility.Visible : Visibility.Collapsed;
         string instruction = "";
         if (sets.Composing)
@@ -421,7 +422,11 @@ internal sealed partial class FluentWindow
                 }
             };
         });
-        if (!windowClosed && changed) BindProfileSets(saved.Id);
+        if (!windowClosed && changed)
+        {
+            BindProfileSets(saved.Id);
+            SetCatalogStatus("Набор переименован", $"Новое название: «{saved.Name}».", InfoBarSeverity.Success);
+        }
     }
 
     async Task DeleteProfileSet()

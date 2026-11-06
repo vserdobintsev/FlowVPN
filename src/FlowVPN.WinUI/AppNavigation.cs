@@ -17,6 +17,8 @@ internal sealed partial class FluentWindow
         try
         {
             int previousPage = page;
+            if (previousPage != index)
+                C<InfoBar>("ProfileSetupFeedback").IsOpen = false;
             page = index;
             var destination = Page(index);
             bool general = destination.General;
