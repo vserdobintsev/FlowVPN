@@ -26,13 +26,11 @@ internal sealed partial class FluentWindow
             }
             finally { closing = true; Close(); Application.Current.Exit(); }
         }
-        else if (settings.Sources.Count == 0 && !Entry.Preview && !Entry.Startup)
+        else if (settings.Sources.Count == 0)
         {
-            try
-            {
-                await ImportClients();
-            }
-            catch (Exception e) { await Message(e.Message, "Импорт не выполнен"); }
+            SelectPage(2);
+            if (!Entry.Startup)
+                C<Microsoft.UI.Xaml.Controls.Button>("AddConnectionButton").Focus(FocusState.Programmatic);
         }
     }
 

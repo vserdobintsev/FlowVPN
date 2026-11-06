@@ -81,7 +81,7 @@ internal sealed partial class FluentWindow : Window
         Hook("RemoveApps", () => { RemoveApplications(); return Task.CompletedTask; });
         Hook("DomainsButton", EditDomains);
         Hook("ImportClientsButton", ImportClients);
-        Hook("ImportFileButton", () => { ImportMenu(); return Task.CompletedTask; });
+        Hook("AddConnectionButton", AddConnection);
         Hook("RenameSourceButton", RenameSource);
         Hook("DeleteSourceButton", DeleteSource);
         Hook("UpdateRulesButton", () => UpdateRules(true));
@@ -155,9 +155,12 @@ internal sealed partial class FluentWindow : Window
             sl.Items.Clear();
             foreach (var s in settings.Sources)
             {
-                combo.Items.Add(new ComboBoxItem { Content = s.Name + " · " + s.Kind, Tag = s.Id });
-                sl.Items.Add(Card(s.Name, s.Kind + " · " + s.Origin, "\uE968", s));
+                combo.Items.Add(new ComboBoxItem { Content = s.Name + " · " + ConnectionTypeLabel(s), Tag = s.Id });
+                sl.Items.Add(Card(s.Name, ConnectionTypeLabel(s) + " · " + s.Origin, "\uE968", s));
             }
+            C<InfoBar>("EmptySourcesHint").IsOpen = settings.Sources.Count == 0;
+            sl.Visibility = settings.Sources.Count == 0 ? Visibility.Collapsed : Visibility.Visible;
+            C<FrameworkElement>("SourceActions").Visibility = sl.Visibility;
         }
         finally { binding = previous; }
         BindProfile();
@@ -311,6 +314,7 @@ internal sealed partial class FluentWindow : Window
         C<Grid>("MainArea").Padding = new Thickness(compact ? 18 : 28, 20, compact ? 18 : 28, 14);
         C<ListView>("AppList").MaxHeight = Math.Max(120, root.ActualHeight - 470);
         C<ListView>("SourceList").MaxHeight = Math.Max(130, root.ActualHeight - 450);
+        C<StackPanel>("SourceCommands").Orientation = root.ActualWidth - (compact ? 80 : 248) < 700 ? Orientation.Vertical : Orientation.Horizontal;
         C<TextBlock>("ProfileHeading").FontSize = root.ActualWidth < 900 ? 22 : 27;
         C<Button>("ThemeButton").Content = compact ? "◐" : theme == 1 ? "☀  Светлая тема" : theme == 2 ? "◐  Тёмная тема" : "◐  Системная тема";
         C<StackPanel>("SidebarFooter").Children[1].Visibility = compact ? Visibility.Collapsed : Visibility.Visible;
@@ -332,7 +336,7 @@ internal sealed partial class FluentWindow : Window
         var result = await Dialog(title, stack, "Сохранить");
         return result == ContentDialogResult.Primary ? (input is PasswordBox p ? p.Password : ((TextBox)input).Text).Trim() : null;
     }
-    async Task<ContentDialogResult> Dialog(string title, object content, string primary = "OK", bool cancel = true)
+    async Task<ContentDialogResult> Dialog(string title, object content, string primary = "OK", bool cancel = true, Action<ContentDialog>? configure = null)
     {
         if (dialogOpen)
             return ContentDialogResult.None;
@@ -340,6 +344,7 @@ internal sealed partial class FluentWindow : Window
         try
         {
             var dialog = new ContentDialog { XamlRoot = root.XamlRoot, RequestedTheme = root.ActualTheme, Title = title, Content = content, PrimaryButtonText = primary, CloseButtonText = cancel ? "Отмена" : "", DefaultButton = ContentDialogButton.Primary };
+            configure?.Invoke(dialog);
             ReviewDialog(dialog);
             return await dialog.ShowAsync();
         }
@@ -385,33 +390,6 @@ internal sealed partial class FluentWindow : Window
         Menu(("Выбрать приложения…", PickApplications), ("Из запущенных процессов…", PickProcesses), ("Выбрать EXE-файлы…", () => { using var d = new WinForms.OpenFileDialog { Filter = "Приложения (*.exe)|*.exe", Multiselect = true }; if (d.ShowDialog(new HwndOwner(this)) == WinForms.DialogResult.OK) AddApps(d.FileNames.Select(AppRule.File)); return Task.CompletedTask; }
         ), ("Папка приложения…", () => { using var d = new WinForms.FolderBrowserDialog { Description = "Включить все EXE в папке и её подпапках", UseDescriptionForTitle = true }; if (d.ShowDialog(new HwndOwner(this)) == WinForms.DialogResult.OK) AddApps([AppRule.Folder(d.SelectedPath)]); return Task.CompletedTask; }
         )).ShowAt(C<Button>("AddApp"));
-    }
-    async Task ImportClients()
-    {
-        C<Button>("ImportClientsButton").IsEnabled = false;
-        try
-        {
-            // Read client files on the worker; merge into the live model only on the UI thread.
-            var imported = new Settings();
-            var result = await Task.Run(() => Importers.Installed(imported));
-            if (windowClosed)
-                return;
-            int added = 0;
-            foreach (var source in imported.Sources)
-                if (Store.AddSource(settings, source))
-                    added++;
-            Store.SeedProfiles(settings);
-            Store.Save(settings);
-            BindAll();
-            await Message($"Добавлено подключений: {added}." + (result.Notes.Count > 0 ? "\n\n" + string.Join("\n", result.Notes) : ""), "Импорт завершён");
-        }
-        finally { if (!windowClosed) C<Button>("ImportClientsButton").IsEnabled = true; }
-    }
-    void ImportMenu()
-    {
-        Menu(("Файл OpenVPN (.ovpn)…", () => { using var d = new WinForms.OpenFileDialog { Filter = "OpenVPN (*.ovpn)|*.ovpn" }; if (d.ShowDialog(new HwndOwner(this)) == WinForms.DialogResult.OK) { Store.AddSource(settings, Importers.OpenVpn(d.FileName)); Store.SeedProfiles(settings); Store.Save(settings); BindAll(); } return Task.CompletedTask; }
-        ), ("Ключ Outline…", async () => { var key = await Prompt("Импорт Outline", "Ключ ss:// или ssconf://", secret: true); if (string.IsNullOrWhiteSpace(key)) return; var source = await Importers.DynamicOutline(key); Store.AddSource(settings, source); Store.SeedProfiles(settings); Store.Save(settings); BindAll(); }
-        )).ShowAt(C<Button>("ImportFileButton"));
     }
     async Task RenameSource()
     {

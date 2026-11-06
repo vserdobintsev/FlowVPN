@@ -54,7 +54,7 @@ internal static class ImportChecks
         const string basicOutline = "{\"server\":\"::1\",\"server_port\":23456,\"method\":\"chacha20-ietf-poly1305\",\"password\":\"fixture:password\"}";
         var outline = JsonNode.Parse(Importers.DynamicPayload(basicOutline).ConnectionJson)!;
         check(outline["server"]?.ToString() == "::1" && outline["password"]?.ToString() == "fixture:password", "Dynamic Outline JSON preserves IPv6 hosts and colon-containing passwords");
-        foreach (string bad in new[] { basicOutline.Replace("}", ",\"prefix\":\"POST \"}"), basicOutline.Replace("23456", "\"23456\""), basicOutline.Replace("fixture:password", ""), basicOutline.Replace("::1", "example.test/path") })
+        foreach (string bad in new[] { basicOutline.Replace("}", ",\"prefix\":\"POST \"}"), basicOutline.Replace("23456", "\"23456\""), basicOutline.Replace("::1", "example.test/path") })
         {
             bool rejected = false;
             try

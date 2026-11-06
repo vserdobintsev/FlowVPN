@@ -15,6 +15,7 @@ internal static class FeatureChecks
         }
         SecurityChecks.Run(Check);
         ImportChecks.Run(Check);
+        ManualConnectionChecks.Run(Check);
         LocalPathChecks.Run(Check);
         Check(TaskbarState.From(false, false, false, true) is { Running: false, Enabled: true } && TaskbarState.From(false, true, false, false) is { Running: true, Enabled: true }, "One taskbar command toggles between connect and disconnect");
         Check(!TaskbarState.From(true, false, false, true).Enabled && !TaskbarState.From(false, false, true, true).Enabled && !TaskbarState.From(false, false, false, false).Enabled, "Taskbar command is disabled in preview, during transitions and without a source");

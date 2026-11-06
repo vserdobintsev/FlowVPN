@@ -1,4 +1,8 @@
+using System.Globalization;
+using System.Net;
+using System.Net.Sockets;
 using System.Text;
+using System.Text.Json;
 using System.Text.Json.Nodes;
 using System.Text.RegularExpressions;
 
@@ -6,13 +10,17 @@ namespace FlowVPN;
 
 public static class Importers
 {
+    const int MaxOpenVpnBytes = 4 * 1024 * 1024;
+    const int MaxAccessKeyLength = 65536;
+    public static IReadOnlyList<string> ShadowsocksMethods { get; } = Array.AsReadOnly<string>(
+        ["chacha20-ietf-poly1305", "aes-128-gcm", "aes-256-gcm", "2022-blake3-aes-128-gcm", "2022-blake3-aes-256-gcm", "2022-blake3-chacha20-poly1305"]);
     static readonly TimeSpan ParseTimeout = TimeSpan.FromMilliseconds(250);
     static string ReadMaterial(string path)
     {
         if (!LocalPathPolicy.TryFile(path, out string full))
             throw new InvalidDataException("Импортируйте профиль и ключи из существующих локальных файлов. Сетевые пути и ссылки на них не поддерживаются.");
         using var stream = new FileStream(full, FileMode.Open, FileAccess.Read, FileShare.Read);
-        if (stream.Length > 4 * 1024 * 1024)
+        if (stream.Length > MaxOpenVpnBytes)
             throw new InvalidDataException("Файл OpenVPN больше допустимого размера.");
         using var reader = new StreamReader(stream);
         return reader.ReadToEnd();
@@ -21,6 +29,15 @@ public static class Importers
     public static VpnSource OpenVpn(string path)
     {
         var raw = ReadMaterial(path);
+        return ParseOpenVpn(raw, path, Path.GetDirectoryName(Path.GetFullPath(path))!);
+    }
+    public static VpnSource OpenVpnText(string raw, string? name = null) =>
+        ParseOpenVpn(raw, "OpenVPN · вставленный текст", null, name);
+
+    static VpnSource ParseOpenVpn(string raw, string origin, string? materialBaseDirectory, string? name = null)
+    {
+        if (string.IsNullOrWhiteSpace(raw) || raw.Length > MaxOpenVpnBytes || Encoding.UTF8.GetByteCount(raw) > MaxOpenVpnBytes)
+            throw new InvalidDataException("Вставьте непустую конфигурацию OpenVPN размером не больше 4 МиБ.");
         var blocks = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
         foreach (Match m in Regex.Matches(raw, @"<([\w-]+)>\s*([\s\S]*?)\s*</\1>", RegexOptions.None, ParseTimeout))
             blocks[m.Groups[1].Value] = m.Groups[2].Value + "\n";
@@ -43,12 +60,16 @@ public static class Importers
         string Value(string key, string fallback = "") => directives.TryGetValue(key, out var list) ? list.Last().FirstOrDefault() ?? fallback : fallback;
         string Material(string key)
         {
+            if (materialBaseDirectory == null && directives.ContainsKey(key) && Value(key) != "[inline]")
+                throw new InvalidDataException($"Вставленный текст должен содержать блок <{key}> вместо пути к файлу. Для внешних сертификатов и ключей импортируйте файл .ovpn.");
             if (blocks.TryGetValue(key, out var v))
-                return v;
+                return !string.IsNullOrWhiteSpace(v) ? v : throw new InvalidDataException($"Блок <{key}> не должен быть пустым.");
+            if (materialBaseDirectory == null)
+                throw new InvalidDataException($"Добавьте в текст блок <{key}>. Если сертификаты и ключи хранятся отдельно, импортируйте файл .ovpn.");
             var f = Value(key);
             if (f.Length == 0)
                 throw new Exception($"В OpenVPN-профиле отсутствует {key}.");
-            return ReadMaterial(Path.GetFullPath(f, Path.GetDirectoryName(Path.GetFullPath(path))!));
+            return ReadMaterial(Path.GetFullPath(f, materialBaseDirectory));
         }
         var blocked = new[] { "tls-auth", "tls-crypt", "tls-crypt-v2", "auth-user-pass", "pkcs12", "secret", "http-proxy", "socks-proxy", "compress", "comp-lzo", "script-security", "up", "down", "plugin", "remote-random-hostname", "tls-verify", "route-up", "route-pre-down", "tls-remote", "verify-hash", "crl-verify", "remote-cert-ku", "remote-cert-eku", "tls-cipher", "tls-ciphersuites", "tls-version-min", "tls-version-max", "peer-fingerprint", "tls-cert-profile", "tls-groups", "ecdh-curve", "ns-cert-type", "capath", "config", "connection", "tls-export-cert", "ipchange", "x509-username-field", "compat-mode" };
         var unsupported = blocked.Where(k => directives.ContainsKey(k) || blocks.ContainsKey(k)).ToArray();
@@ -94,13 +115,14 @@ public static class Importers
             endpoint["data_ciphers"] = Arr(Value("data-ciphers").Split(':'));
         if (Value("auth") != "")
             endpoint["auth"] = Value("auth");
+        string configuration = endpoint.ToJsonString();
         return new()
         {
-            Name = remotes[0][0] + " · OpenVPN",
+            Name = string.IsNullOrWhiteSpace(name) ? remotes[0][0] + " · OpenVPN" : name.Trim(),
             Kind = "OpenVPN",
-            Origin = path,
-            ConnectionJson = endpoint.ToJsonString(),
-            Fingerprint = Store.Hash(endpoint.ToJsonString())
+            Origin = origin,
+            ConnectionJson = configuration,
+            Fingerprint = Store.Hash(configuration)
         };
     }
     static string Base64(string s)
@@ -111,7 +133,7 @@ public static class Importers
     public static VpnSource Outline(string access, string? name = null)
     {
         access = access.Trim();
-        if (access.Length > 65536)
+        if (access.Length > MaxAccessKeyLength)
             throw new InvalidDataException("Ключ Outline слишком длинный.");
         if (!access.StartsWith("ss://", StringComparison.OrdinalIgnoreCase))
             throw new Exception("Ожидается ключ ss://. Динамический ssconf:// можно импортировать отдельной кнопкой.");
@@ -143,22 +165,56 @@ public static class Importers
             throw new Exception("Некорректная авторизация Outline.");
         string method = auth[..colon], password = auth[(colon + 1)..];
         var uri = new Uri("tcp://" + body[(at + 1)..]);
-        if (uri.AbsolutePath is not ("" or "/") || uri.UserInfo.Length > 0)
+        if (uri.AbsolutePath is not ("" or "/") || uri.UserInfo.Length > 0 || uri.Query.Length > 0 || uri.Fragment.Length > 0)
             throw new InvalidDataException("Ключ Outline содержит неподдерживаемый путь сервера.");
-        if (uri.Port < 1 || uri.Port > 65535)
-            throw new Exception("Некорректный порт Outline.");
-        var supported = new[] { "chacha20-ietf-poly1305", "aes-128-gcm", "aes-256-gcm", "2022-blake3-aes-128-gcm", "2022-blake3-aes-256-gcm", "2022-blake3-chacha20-poly1305" };
-        if (!supported.Contains(method))
-            throw new Exception("Метод Shadowsocks не поддерживается приложением: " + method);
-        var node = new JsonObject { ["type"] = "shadowsocks", ["tag"] = "vpn", ["server"] = uri.Host.Trim('[', ']'), ["server_port"] = uri.Port, ["method"] = method, ["password"] = password, ["domain_resolver"] = "dns-direct" };
+        return ShadowsocksSource(uri.Host, uri.Port, method, password, name, "Outline", "Outline access key");
+    }
+
+    public static VpnSource Shadowsocks(string host, int port, string method, string password, string? name = null) =>
+        ShadowsocksSource(host, port, method, password, name, "Shadowsocks", "Shadowsocks · ручная настройка");
+
+    static VpnSource ShadowsocksSource(string host, int port, string method, string password, string? name, string label, string origin)
+    {
+        host = ShadowsocksHost(host);
+        if (port is < 1 or > 65535)
+            throw new InvalidDataException("Укажите порт от 1 до 65535.");
+        if (!ShadowsocksMethods.Contains(method, StringComparer.Ordinal))
+            throw new InvalidDataException("Метод Shadowsocks не поддерживается приложением.");
+        if (password == null || password.Length > MaxAccessKeyLength)
+            throw new InvalidDataException("Пароль Shadowsocks превышает допустимый размер.");
+        // Credentials are opaque: URI syntax, whitespace and control characters are not rewritten.
+        var node = new JsonObject { ["type"] = "shadowsocks", ["tag"] = "vpn", ["server"] = host, ["server_port"] = port, ["method"] = method, ["password"] = password, ["domain_resolver"] = "dns-direct" };
+        string configuration = node.ToJsonString();
         return new()
         {
-            Name = string.IsNullOrWhiteSpace(name) ? uri.Host + " · Outline" : name,
+            Name = string.IsNullOrWhiteSpace(name) ? (host.Contains(':') ? "[" + host + "]" : host) + " · " + label : name,
             Kind = "Outline",
-            Origin = "Outline access key",
-            ConnectionJson = node.ToJsonString(),
-            Fingerprint = Store.Hash(node.ToJsonString())
+            Origin = origin,
+            ConnectionJson = configuration,
+            Fingerprint = Store.Hash(configuration)
         };
+    }
+
+    static string ShadowsocksHost(string host)
+    {
+        host = host?.Trim() ?? "";
+        if (host.Length is 0 or > 253 || host.Any(char.IsWhiteSpace) || host.Any(char.IsControl) ||
+            host.IndexOfAny(['/', '\\', '@', '?', '#']) >= 0)
+            throw new InvalidDataException("Укажите доменное имя или IP-адрес сервера без протокола, пути и порта.");
+        if (host.StartsWith('[') || host.EndsWith(']'))
+        {
+            if (!host.StartsWith('[') || !host.EndsWith(']') ||
+                !IPAddress.TryParse(host[1..^1], out var address) || address.AddressFamily != AddressFamily.InterNetworkV6)
+                throw new InvalidDataException("Некорректный IPv6-адрес сервера.");
+            return address.ToString();
+        }
+        if (IPAddress.TryParse(host, out var ip))
+            return ip.ToString();
+        try { host = new IdnMapping().GetAscii(host).ToLowerInvariant(); }
+        catch (ArgumentException) { throw new InvalidDataException("Некорректное доменное имя сервера."); }
+        if (host.Length > 253 || Uri.CheckHostName(host) != UriHostNameType.Dns)
+            throw new InvalidDataException("Некорректное доменное имя или IP-адрес сервера.");
+        return host;
     }
     static IEnumerable<(string Key, string? Name)> Keys(JsonNode? n)
     {
@@ -215,13 +271,15 @@ public static class Importers
         Store.SeedProfiles(settings);
         return (count, notes);
     }
-    public static async Task<VpnSource> DynamicOutline(string input)
+    public static async Task<VpnSource> DynamicOutline(string input, CancellationToken token = default)
     {
+        token.ThrowIfCancellationRequested();
         input = input.Trim();
         if (!input.StartsWith("ssconf://", StringComparison.OrdinalIgnoreCase))
             return Outline(input);
         var address = "https://" + input[9..].Split('#')[0];
-        using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(25));
+        using var deadline = CancellationTokenSource.CreateLinkedTokenSource(token);
+        deadline.CancelAfter(TimeSpan.FromSeconds(25));
         using var client = BoundedHttp.Client(TimeSpan.FromSeconds(25));
         var text = Encoding.UTF8.GetString(await BoundedHttp.Download(client, address, 1024 * 1024, deadline.Token));
         var source = DynamicPayload(text);
@@ -234,18 +292,19 @@ public static class Importers
     {
         if (text.TrimStart().StartsWith("ss://"))
             return Outline(text.Trim());
-        if (JsonNode.Parse(text) is not JsonObject n || n.Any(p => p.Key is not ("server" or "server_port" or "method" or "password")))
-            throw new InvalidDataException("Этот ssconf использует расширенный формат. Параметры транспорта не были отброшены: импорт остановлен.");
-        string Value(string key) => n[key] is JsonValue value && value.TryGetValue<string>(out var result) && result.Length > 0
-            ? result : throw new InvalidDataException("Некорректное поле динамического ключа Outline: " + key);
-        if (n["server_port"] is not JsonValue portValue || !portValue.TryGetValue<int>(out int port) || port is < 1 or > 65535)
-            throw new InvalidDataException("Некорректный порт динамического ключа Outline.");
-        string host = Value("server");
-        if (Uri.CheckHostName(host.Trim('[', ']')) == UriHostNameType.Unknown)
-            throw new InvalidDataException("Некорректный адрес динамического ключа Outline.");
-        if (host.Contains(':') && !host.StartsWith('['))
-            host = "[" + host + "]";
-        var auth = Convert.ToBase64String(Encoding.UTF8.GetBytes(Value("method") + ":" + Value("password")));
-        return Outline("ss://" + auth + "@" + host + ":" + port);
+        using var document = JsonDocument.Parse(text, new JsonDocumentOptions { MaxDepth = 16 });
+        var root = document.RootElement;
+        if (root.ValueKind != JsonValueKind.Object)
+            throw new InvalidDataException("JSON Shadowsocks должен содержать объект с параметрами подключения.");
+        var fields = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var property in root.EnumerateObject())
+            if (property.Name is not ("server" or "server_port" or "method" or "password") || !fields.Add(property.Name))
+                throw new InvalidDataException("JSON Shadowsocks содержит повторные или неподдерживаемые поля. Параметры не были отброшены: импорт остановлен.");
+        string Value(string key, bool allowEmpty = false) => root.TryGetProperty(key, out var value) && value.ValueKind == JsonValueKind.String &&
+            value.GetString() is { } result && (allowEmpty || result.Length > 0)
+                ? result : throw new InvalidDataException("Некорректное поле JSON Shadowsocks: " + key);
+        if (!root.TryGetProperty("server_port", out var portValue) || portValue.ValueKind != JsonValueKind.Number || !portValue.TryGetInt32(out int port) || port is < 1 or > 65535)
+            throw new InvalidDataException("Некорректный порт JSON Shadowsocks.");
+        return ShadowsocksSource(Value("server"), port, Value("method"), Value("password", allowEmpty: true), null, "Shadowsocks", "Shadowsocks · JSON");
     }
 }

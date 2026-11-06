@@ -249,7 +249,7 @@ public sealed class VpnEngine : IDisposable
             if (selected.DynamicKey.Length > 0)
             {
                 Set("Обновление динамического ключа Outline…");
-                var updated = await Importers.DynamicOutline(selected.DynamicKey).WaitAsync(token);
+                var updated = await Importers.DynamicOutline(selected.DynamicKey, token);
                 selected.ConnectionJson = updated.ConnectionJson;
             }
             var plan = await BrokerPlanBuilder.Create(settings, profile, token);

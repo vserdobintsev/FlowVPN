@@ -126,9 +126,19 @@ public static class Store
     public static void WriteJson(string path, JsonNode o) => Atomic(path, Encoding.UTF8.GetBytes(o.ToJsonString(JsonOptions)));
     public static string Hash(string value) => Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(Encoding.UTF8.GetBytes(value)));
     public static void SeedProfiles(Settings settings) => SeedCatalogProfiles?.Invoke(settings);
+    public static bool SameSource(VpnSource left, VpnSource right)
+    {
+        if (!string.Equals(left.Kind, right.Kind, StringComparison.Ordinal))
+            return false;
+        string? leftKey = left.DynamicKey?.Trim(), rightKey = right.DynamicKey?.Trim();
+        if (!string.IsNullOrEmpty(leftKey) || !string.IsNullOrEmpty(rightKey))
+            return !string.IsNullOrEmpty(leftKey) && string.Equals(leftKey, rightKey, StringComparison.Ordinal);
+        return (!string.IsNullOrEmpty(left.Fingerprint) && string.Equals(left.Fingerprint, right.Fingerprint, StringComparison.Ordinal)) ||
+            string.Equals(left.ConnectionJson, right.ConnectionJson, StringComparison.Ordinal);
+    }
     public static bool AddSource(Settings s, VpnSource source)
     {
-        if (s.Sources.Any(x => x.Fingerprint == source.Fingerprint || (x.Kind == source.Kind && x.ConnectionJson == source.ConnectionJson)))
+        if (s.Sources.Any(x => SameSource(x, source)))
             return false;
         s.Sources.Add(source);
         return true;
