@@ -68,7 +68,7 @@ Set-ManagedRuleset @{
 Set-ManagedRuleset @{
     name = 'releases: immutable version tags'; target = 'tag'; enforcement = 'active'; bypass_actors = @()
     conditions = @{ ref_name = @{ include = @('refs/tags/v*'); exclude = @() } }
-    rules = @(@{ type = 'deletion' }, @{ type = 'non_fast_forward' })
+    rules = @(@{ type = 'deletion' }, @{ type = 'non_fast_forward' }, @{ type = 'update'; parameters = @{ update_allows_fetch_and_merge = $false } })
 }
 $null = Invoke-GitHub PUT "$endpoint/environments/release" @{
     wait_timer = 0; prevent_self_review = $false
