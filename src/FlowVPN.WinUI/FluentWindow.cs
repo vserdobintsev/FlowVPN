@@ -87,12 +87,10 @@ internal sealed partial class FluentWindow : Window
         Hook("UpdateRulesButton", () => UpdateRules(true));
         Hook("RepositoryLink", () => { Process.Start(new ProcessStartInfo(RuleRepository.Repository) { UseShellExecute = true }); return Task.CompletedTask; });
         Hook("RefreshLogButton", () => { UpdateLog(); return Task.CompletedTask; });
-        Hook("OpenLogsButton", () =>
+        Hook("OpenLogsButton", async () =>
         {
-            var info = new ProcessStartInfo(Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Windows), "explorer.exe")) { UseShellExecute = true };
-            info.ArgumentList.Add(ProfileLogFolder());
-            Process.Start(info);
-            return Task.CompletedTask;
+            if (!await Windows.System.Launcher.LaunchFolderPathAsync(ProfileLogFolder()))
+                throw new IOException("Windows не удалось открыть папку журнала.");
         });
         Hook("ValidateButton", Validate);
         C<ListView>("ProfileList").SelectionChanged += (_, _) => { if (binding) return; settings.SelectedProfileId = Profile?.Id ?? ""; Store.Save(settings); BindProfile(); SelectPage(0); Pending(); UpdateTray(); };
