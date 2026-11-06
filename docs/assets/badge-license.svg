@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="178" height="20" viewBox="0 0 178 20" role="img" aria-labelledby="title">
+  <title id="title">Лицензия: GPL-3.0-only</title>
+  <clipPath id="clip"><rect width="178" height="20" rx="3"/></clipPath>
+  <g clip-path="url(#clip)"><path fill="#555" d="M0 0h77v20H0z"/><path fill="#007e87" d="M77 0h101v20H77z"/></g>
+  <g fill="#fff" text-anchor="middle" font-family="Verdana, DejaVu Sans, sans-serif" font-size="11"><text x="38.5" y="14">Лицензия</text><text x="127.5" y="14">GPL-3.0-only</text></g>
+</svg>

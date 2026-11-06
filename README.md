@@ -3,10 +3,18 @@
 </p>
 
 <p align="center">
+  <a href="https://github.com/vserdobintsev/FlowVPN/actions/workflows/verify.yml"><img src="https://github.com/vserdobintsev/FlowVPN/actions/workflows/verify.yml/badge.svg?branch=main" alt="Статус проверки сборки в GitHub Actions" height="20"></a>
+  <a href="LICENSE"><img src="docs/assets/badge-license.svg" alt="Лицензия: GPL-3.0-only" height="20"></a>
+  <a href="docs/INSTALLATION.md"><img src="docs/assets/badge-platform.svg" alt="Платформа: Windows x64" height="20"></a>
+  <a href="docs/DEVELOPMENT.md"><img src="docs/assets/badge-stack.svg" alt="Технологии: .NET 10 и WinUI 3" height="20"></a>
+</p>
+
+<p align="center">
   <a href="docs/INSTALLATION.md">Установка</a> ·
   <a href="docs/DEVELOPMENT.md">Сборка</a> ·
   <a href="docs/ARCHITECTURE.md">Архитектура</a> ·
   <a href="CONTRIBUTING.md">Участие</a> ·
+  <a href="CONTRIBUTORS.md">Участники</a> ·
   <a href="SECURITY.md">Безопасность</a>
 </p>
 
