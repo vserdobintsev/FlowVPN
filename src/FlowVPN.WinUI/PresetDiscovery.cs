@@ -23,7 +23,7 @@ internal static class PresetDiscovery
                     if (entry?.GetValue(null) is not string value)
                         continue;
                     string path = Environment.ExpandEnvironmentVariables(value.Trim('"'));
-                    if (!File.Exists(path))
+                    if (!LocalPathPolicy.TryFile(path, out path))
                         continue;
                     if (productContains.Length > 0 && !(System.Diagnostics.FileVersionInfo.GetVersionInfo(path).ProductName ?? "").Contains(productContains, StringComparison.OrdinalIgnoreCase))
                         continue;
@@ -48,12 +48,12 @@ internal static class PresetDiscovery
                         using var entry = uninstall.OpenSubKey(key);
                         string name = entry?.GetValue("DisplayName") as string ?? "";
                         string directory = entry?.GetValue("InstallLocation") as string ?? "";
-                        if (Path.IsPathFullyQualified(directory) && Directory.Exists(directory))
-                            result.Add(new(name, directory));
+                        if (LocalPathPolicy.TryDirectory(Environment.ExpandEnvironmentVariables(directory.Trim('"')), out string localDirectory))
+                            result.Add(new(name, localDirectory));
                         string icon = entry?.GetValue("DisplayIcon") as string ?? "";
                         var match = Regex.Match(icon, "^\\s*\"?(.*?\\.exe)(?:\"?\\s*,\\s*-?\\d+)?\\s*$", RegexOptions.IgnoreCase);
-                        if (match.Success && File.Exists(match.Groups[1].Value))
-                            result.Add(new(name, Path.GetDirectoryName(match.Groups[1].Value)!));
+                        if (match.Success && LocalPathPolicy.TryFile(Environment.ExpandEnvironmentVariables(match.Groups[1].Value), out string localIcon))
+                            result.Add(new(name, Path.GetDirectoryName(localIcon)!));
                     }
                 }
                 catch { }
@@ -63,11 +63,11 @@ internal static class PresetDiscovery
     public static IEnumerable<string> Directories(string template)
     {
         if (!template.Contains('*'))
-            return [template];
+            return LocalPathPolicy.TryDirectory(template, out string singleDirectory) ? [singleDirectory] : [];
         string root = Path.GetPathRoot(template) ?? "";
-        if (root.Length == 0)
+        if (!LocalPathPolicy.TryDirectory(root, out string localRoot))
             return [];
-        IEnumerable<string> paths = [root];
+        IEnumerable<string> paths = [localRoot];
         foreach (string part in template[root.Length..].Split(Path.DirectorySeparatorChar, StringSplitOptions.RemoveEmptyEntries))
         {
             var next = new List<string>();
@@ -75,16 +75,19 @@ internal static class PresetDiscovery
             {
                 if (!part.Contains('*'))
                 {
-                    next.Add(Path.Combine(parent, part));
+                    if (LocalPathPolicy.TryDirectory(Path.Combine(parent, part), out string localDirectory))
+                        next.Add(localDirectory);
                     continue;
                 }
                 try
                 {
-                    next.AddRange(Directory.EnumerateDirectories(parent, part, new EnumerationOptions
+                    if (!LocalPathPolicy.TryDirectory(parent, out string localParent))
+                        continue;
+                    next.AddRange(Directory.EnumerateDirectories(localParent, part, new EnumerationOptions
                     {
                         IgnoreInaccessible = true,
                         AttributesToSkip = FileAttributes.ReparsePoint
-                    }));
+                    }).Where(path => LocalPathPolicy.TryDirectory(path, out _, allowLocalLinks: false)));
                 }
                 catch { }
             }
@@ -96,7 +99,7 @@ internal static class PresetDiscovery
         component.RequiresAnyFile.Count == 0 || component.RequiresAnyFile.Any(t =>
         {
             string path = AppPresets.Expand(t, locations);
-            return Directories(Path.GetDirectoryName(path)!).Any(d => File.Exists(Path.Combine(d, Path.GetFileName(path))));
+            return Directories(Path.GetDirectoryName(path)!).Any(d => LocalPathPolicy.TryFile(Path.Combine(d, Path.GetFileName(path)), out _));
         });
     public static IEnumerable<string> PathExecutables(string name)
     {
@@ -107,12 +110,11 @@ internal static class PresetDiscovery
             string path;
             try
             {
-                if (!Path.IsPathFullyQualified(directory.Trim('"')))
+                if (!LocalPathPolicy.TryDirectory(directory.Trim('"'), out string localDirectory))
                     continue;
-                path = Path.Combine(directory.Trim('"'), name);
-                if (!File.Exists(path))
+                path = Path.Combine(localDirectory, name);
+                if (!LocalPathPolicy.TryFile(path, out path))
                     continue;
-                path = new FileInfo(path).ResolveLinkTarget(true)?.FullName ?? path;
                 if (!Path.GetFileName(path).Equals(name, StringComparison.OrdinalIgnoreCase))
                     continue;
             }
@@ -124,13 +126,15 @@ internal static class PresetDiscovery
     {
         try
         {
-            return Directory.GetFiles(directory, name, new EnumerationOptions
+            if (!LocalPathPolicy.TryDirectory(directory, out string localDirectory))
+                return [];
+            return Directory.GetFiles(localDirectory, name, new EnumerationOptions
             {
                 RecurseSubdirectories = true,
                 IgnoreInaccessible = true,
                 AttributesToSkip = FileAttributes.ReparsePoint,
                 MaxRecursionDepth = 10
-            });
+            }).Where(path => LocalPathPolicy.TryFile(path, out _, allowLocalLinks: false)).ToArray();
         }
         catch { return []; }
     }

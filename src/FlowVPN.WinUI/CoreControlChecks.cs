@@ -35,6 +35,7 @@ internal static class CoreControlChecks
             ["experimental"] = api.Configuration()
         };
         Process? process = null;
+        CoreIntegrity? verifiedCore = null;
         CoreJob? job = null;
         using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(20));
         try
@@ -42,10 +43,11 @@ internal static class CoreControlChecks
             Store.WriteJson(file, config);
             await CoreCli.Run("check", "-c", file);
             Check(api.Port != proxyPort && api.Secret.Length == 64 && config["experimental"]!["clash_api"]!["external_controller"]!.ToString().StartsWith("127.0.0.1:"), "Control API is loopback-only with a fresh 256-bit secret and a separate port");
-            var start = new ProcessStartInfo(Store.Bin) { UseShellExecute = false, CreateNoWindow = true, RedirectStandardError = true, RedirectStandardOutput = true };
+            var start = new ProcessStartInfo { UseShellExecute = false, CreateNoWindow = true, RedirectStandardError = true, RedirectStandardOutput = true };
             foreach (string arg in new[] { "--disable-color", "run", "-c", file })
                 start.ArgumentList.Add(arg);
-            process = Process.Start(start) ?? throw new InvalidOperationException("Test core did not start");
+            verifiedCore = await Task.Run(() => CoreIntegrity.Start(start));
+            process = verifiedCore.Process;
             job = new CoreJob(process);
             var stderr = process.StandardError.ReadToEndAsync();
             var stdout = process.StandardOutput.ReadToEndAsync();
@@ -114,10 +116,13 @@ internal static class CoreControlChecks
             job?.Dispose();
             if (process != null)
             {
-                if (!process.HasExited)
-                    process.Kill();
-                await process.WaitForExitAsync();
-                process.Dispose();
+                try
+                {
+                    if (!process.HasExited)
+                        process.Kill();
+                    await process.WaitForExitAsync();
+                }
+                finally { verifiedCore?.Dispose(); }
             }
             File.Delete(file);
         }

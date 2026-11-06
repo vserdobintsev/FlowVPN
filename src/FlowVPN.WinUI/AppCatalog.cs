@@ -28,13 +28,13 @@ internal static class AppCatalog
     public static List<CatalogApp> Read(IReadOnlyList<DetectedPreset> presets)
     {
         var apps = new Dictionary<string, CatalogApp>(StringComparer.OrdinalIgnoreCase);
-        bool LocalExe(string path) => RegexPath(path) && path.EndsWith(".exe", StringComparison.OrdinalIgnoreCase) && File.Exists(path);
         void Add(string path, string name, string origin, bool running = false, string iconPath = "")
         {
             try
             {
                 path = Environment.ExpandEnvironmentVariables(path.Trim('"'));
-                if (Path.GetFileName(path).Equals("FlowVPN.exe", StringComparison.OrdinalIgnoreCase) || !LocalExe(path) || System.Text.RegularExpressions.Regex.IsMatch(Path.GetFileName(path), "unins|uninstall|updater|crashpad", System.Text.RegularExpressions.RegexOptions.IgnoreCase))
+                if (!path.EndsWith(".exe", StringComparison.OrdinalIgnoreCase) || !LocalPathPolicy.TryFile(path, out path)
+                    || Path.GetFileName(path).Equals("FlowVPN.exe", StringComparison.OrdinalIgnoreCase) || System.Text.RegularExpressions.Regex.IsMatch(Path.GetFileName(path), "unins|uninstall|updater|crashpad", System.Text.RegularExpressions.RegexOptions.IgnoreCase))
                     return;
                 if (apps.TryGetValue(path, out var found))
                 {
@@ -66,16 +66,18 @@ internal static class AppCatalog
                 dynamic dynamicShell = shell;
                 foreach (var dir in new[] { Environment.GetFolderPath(Environment.SpecialFolder.Programs), Environment.GetFolderPath(Environment.SpecialFolder.CommonPrograms) })
                 {
-                    if (!Directory.Exists(dir))
+                    if (!LocalPathPolicy.TryDirectory(dir, out string localDirectory, allowLocalLinks: false))
                         continue;
-                    foreach (var file in Directory.EnumerateFiles(dir, "*.lnk", new EnumerationOptions { RecurseSubdirectories = true, IgnoreInaccessible = true, AttributesToSkip = FileAttributes.ReparsePoint }))
+                    foreach (var file in Directory.EnumerateFiles(localDirectory, "*.lnk", new EnumerationOptions { RecurseSubdirectories = true, IgnoreInaccessible = true, AttributesToSkip = FileAttributes.ReparsePoint }))
                     {
                         object? link = null;
                         try
                         {
-                            link = dynamicShell.CreateShortcut(file);
+                            if (!LocalPathPolicy.TryFile(file, out string localShortcut, allowLocalLinks: false))
+                                continue;
+                            link = dynamicShell.CreateShortcut(localShortcut);
                             dynamic shortcut = link;
-                            Add((string)shortcut.TargetPath, Path.GetFileNameWithoutExtension(file), "Меню «Пуск»", false, file);
+                            Add((string)shortcut.TargetPath, Path.GetFileNameWithoutExtension(localShortcut), "Меню «Пуск»", false, localShortcut);
                         }
                         catch { }
                         finally { if (link != null && Marshal.IsComObject(link)) Marshal.FinalReleaseComObject(link); }
@@ -97,10 +99,12 @@ internal static class AppCatalog
                         using var entry = paths.OpenSubKey(name);
                         if (entry?.GetValue(null) is string path)
                         {
+                            if (!LocalPathPolicy.TryFile(Environment.ExpandEnvironmentVariables(path.Trim('"')), out path))
+                                continue;
                             string title = Path.GetFileNameWithoutExtension(name);
                             try
                             {
-                                title = FileVersionInfo.GetVersionInfo(path.Trim('"')).FileDescription ?? title;
+                                title = FileVersionInfo.GetVersionInfo(path).FileDescription ?? title;
                             }
                             catch { }
                             Add(path, title, "Установленное приложение");
@@ -115,8 +119,9 @@ internal static class AppCatalog
                 if (process.MainWindowHandle == IntPtr.Zero)
                     continue;
                 string? path = Native.ProcessPath(process.Id);
-                if (path == null)
+                if (!LocalPathPolicy.TryFile(path, out string localPath))
                     continue;
+                path = localPath;
                 string name = Path.GetFileNameWithoutExtension(path);
                 try
                 {
@@ -145,5 +150,4 @@ internal static class AppCatalog
         bool Covered(CatalogApp a) => bundled.Any(b => b.Rules.Any(rule => (b.SuggestedPatterns == null || b.SuggestedPatterns.Contains(rule.Pattern)) && System.Text.RegularExpressions.Regex.IsMatch(a.Path, rule.Pattern)));
         return bundled.Concat(apps.Values.Where(a => !Covered(a))).OrderByDescending(a => a.Running).ThenBy(a => a.Name, StringComparer.CurrentCultureIgnoreCase).ToList();
     }
-    static bool RegexPath(string path) => path.Length > 3 && char.IsLetter(path[0]) && path[1] == ':' && (path[2] == '\\' || path[2] == '/');
 }

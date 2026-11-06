@@ -280,17 +280,21 @@ internal static class LevelStore
     }
     public static List<string> ServerValues(string directory)
     {
+        if (!LocalPathPolicy.TryDirectory(directory, out string localDirectory, allowLocalLinks: false))
+            throw new InvalidDataException("Хранилище Outline должно находиться в существующей локальной папке без перенаправлений.");
         var map = new Dictionary<string, Entry>();
         var budget = new ReadBudget();
         long totalBytes = 0;
         int fileCount = 0;
-        foreach (var file in Directory.EnumerateFiles(directory).Where(f => f.EndsWith(".ldb") || f.EndsWith(".log")))
+        foreach (var file in Directory.EnumerateFiles(localDirectory, "*", new EnumerationOptions { IgnoreInaccessible = true, AttributesToSkip = FileAttributes.ReparsePoint }).Where(f => f.EndsWith(".ldb", StringComparison.OrdinalIgnoreCase) || f.EndsWith(".log", StringComparison.OrdinalIgnoreCase)))
         {
-            totalBytes += new FileInfo(file).Length;
+            if (!LocalPathPolicy.TryFile(file, out string localFile, allowLocalLinks: false))
+                continue;
+            totalBytes += new FileInfo(localFile).Length;
             if (++fileCount > 256 || totalBytes > 256L * 1024 * 1024)
                 throw new InvalidDataException("Хранилище Outline слишком большое для импорта.");
-            var b = Read(file, budget);
-            if (file.EndsWith(".ldb"))
+            var b = Read(localFile, budget);
+            if (localFile.EndsWith(".ldb", StringComparison.OrdinalIgnoreCase))
                 Table(b, map, budget);
             else
                 Log(b, map, budget);

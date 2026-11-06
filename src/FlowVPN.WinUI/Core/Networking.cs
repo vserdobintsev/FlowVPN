@@ -76,12 +76,12 @@ public static class CoreCli
 {
     public static async Task<string> Run(params string[] args)
     {
-        using var verifiedCore = await Task.Run(CoreIntegrity.Acquire);
-        var info = new ProcessStartInfo(Store.Bin) { UseShellExecute = false, CreateNoWindow = true, RedirectStandardOutput = true, RedirectStandardError = true, WorkingDirectory = Store.Root };
+        var info = new ProcessStartInfo { UseShellExecute = false, CreateNoWindow = true, RedirectStandardOutput = true, RedirectStandardError = true };
         info.ArgumentList.Add("--disable-color");
         foreach (var a in args)
             info.ArgumentList.Add(a);
-        using var process = Process.Start(info) ?? throw new Exception("Не удалось запустить sing-box.");
+        using var verifiedCore = await Task.Run(() => CoreIntegrity.Start(info));
+        var process = verifiedCore.Process;
         var stdout = process.StandardOutput.ReadToEndAsync();
         var stderr = process.StandardError.ReadToEndAsync();
         try
@@ -188,7 +188,7 @@ public sealed class VpnEngine
     }
     public string ControlError { get; private set; } = "";
     public VpnHealth Health { get; private set; } = VpnHealth.Stopped; public bool Healthy => Running && Health == VpnHealth.Online;
-    Process? process; CoreJob? job; CancellationTokenSource? monitor; public bool Running => process != null && !process.HasExited; public bool Busy
+    Process? process; CoreIntegrity? verifiedCore; CoreJob? job; CancellationTokenSource? monitor; public bool Running => process != null && !process.HasExited; public bool Busy
     {
         get; private set;
     }
@@ -271,12 +271,13 @@ public sealed class VpnEngine
             string log = Path.Combine(Store.ProfileLogs(profile.Id), "sing-box.log");
             if (File.Exists(log) && new FileInfo(log).Length > 5000000)
                 File.Move(log, log + ".previous", true);
-            var info = new ProcessStartInfo(Store.Bin) { UseShellExecute = false, CreateNoWindow = false, WindowStyle = ProcessWindowStyle.Hidden, WorkingDirectory = Store.Root, RedirectStandardError = true, RedirectStandardOutput = true };
+            var info = new ProcessStartInfo { UseShellExecute = false, CreateNoWindow = false, WindowStyle = ProcessWindowStyle.Hidden, RedirectStandardError = true, RedirectStandardOutput = true };
             foreach (var arg in new[] { "--disable-color", "run", "-c", config })
                 info.ArgumentList.Add(arg);
             if (process != null)
             {
-                process.Dispose();
+                verifiedCore?.Dispose();
+                verifiedCore = null;
                 process = null;
             }
             job?.Dispose();
@@ -284,8 +285,8 @@ public sealed class VpnEngine
             monitor?.Cancel();
             monitor?.Dispose();
             monitor = null;
-            using (await Task.Run(CoreIntegrity.Acquire))
-                process = Process.Start(info) ?? throw new Exception("sing-box не запустился.");
+            verifiedCore = await Task.Run(() => CoreIntegrity.Start(info));
+            process = verifiedCore.Process;
             job = new CoreJob(process);
             _ = Capture(process.StandardError, consolePath);
             _ = Capture(process.StandardOutput, consolePath);
@@ -440,7 +441,7 @@ public sealed class VpnEngine
             {
                 await Native.Stop(process);
             }
-            finally { process.Dispose(); process = null; job?.Dispose(); job = null; }
+            finally { job?.Dispose(); job = null; verifiedCore?.Dispose(); verifiedCore = null; process = null; }
         }
         ActiveProfile = null;
         ActiveProfileId = null;

@@ -74,7 +74,11 @@ public sealed class UpdatePreferences
 }
 public static class Store
 {
+#if FLOWVPN_PACKAGE
+    public static string Root => AppContext.BaseDirectory;
+#else
     public static string Root = AppContext.BaseDirectory;
+#endif
     public static Action<Settings>? SeedCatalogProfiles;
     public static string? DataDirectory;
     public static string Data => DataDirectory ?? System.IO.Path.Combine(Root, "data");
