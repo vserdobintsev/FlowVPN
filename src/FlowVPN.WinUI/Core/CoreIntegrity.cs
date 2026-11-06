@@ -25,7 +25,7 @@ internal sealed class CoreIntegrity : IDisposable
         try
         {
             start.FileName = Store.Bin;
-            start.WorkingDirectory = Store.Root;
+            start.WorkingDirectory = Store.CoreDirectory;
             lease.process = System.Diagnostics.Process.Start(start) ?? throw new InvalidOperationException("Не удалось запустить sing-box.");
             return lease;
         }
@@ -37,14 +37,14 @@ internal sealed class CoreIntegrity : IDisposable
         var lease = new CoreIntegrity();
         try
         {
-            lease.LockDirectoryChain(Path.Combine(Store.Root, "core"));
+            lease.LockDirectoryChain(Store.CoreDirectory);
             using var resource = Assembly.GetExecutingAssembly().GetManifestResourceStream("FlowVPN.engine.lock.json")!;
             using var document = JsonDocument.Parse(resource);
             foreach (var item in document.RootElement.GetProperty("Files").EnumerateObject())
             {
                 if (Path.GetFileName(item.Name) != item.Name)
                     throw new InvalidDataException("Некорректное имя файла движка.");
-                var handle = OpenChecked(Path.Combine(Store.Root, "core", item.Name), false);
+                var handle = OpenChecked(Path.Combine(Store.CoreDirectory, item.Name), false);
                 FileStream file;
                 try { file = new FileStream(handle, FileAccess.Read); }
                 catch { handle.Dispose(); throw; }

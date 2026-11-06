@@ -82,7 +82,8 @@ public static class Store
     public static Action<Settings>? SeedCatalogProfiles;
     public static string? DataDirectory;
     public static string Data => DataDirectory ?? System.IO.Path.Combine(Root, "data");
-    public static string Bin => System.IO.Path.Combine(Root, "core", "sing-box.exe");
+    public static string CoreDirectory => System.IO.Path.Combine(AppContext.BaseDirectory, "core");
+    public static string Bin => System.IO.Path.Combine(CoreDirectory, "sing-box.exe");
     public static string Rules => System.IO.Path.Combine(Data, "rules");
     public static string Run => System.IO.Path.Combine(Data, "run");
     public static string ProfileLogs(string id) => System.IO.Path.Combine(Data, "logs", "profiles", Hash(id));

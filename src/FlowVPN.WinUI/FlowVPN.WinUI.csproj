@@ -51,10 +51,10 @@
     <AppxManifest Include="Package.appxmanifest" Condition="'$(Configuration)'=='MsixRelease'" />
     <AppxManifest Include="Package.Preview.appxmanifest" Condition="'$(Configuration)'=='MsixPreview'" />
     <Content Include="Assets\*.png" />
-    <Content Include="../../outputs/FlowVPN/core/sing-box.exe;../../outputs/FlowVPN/core/libcronet.dll;../../outputs/FlowVPN/core/LICENSE" Link="core/%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
   <ItemGroup>
     <AssemblyMetadata Include="FlowVPN.PackageMode" Value="$(FlowVPNPackageMode)" />
+    <Content Include="../../outputs/FlowVPN/core/sing-box.exe;../../outputs/FlowVPN/core/libcronet.dll;../../outputs/FlowVPN/core/LICENSE" Link="core/%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
     <Content Include="Assets/FlowVPN.ico" Link="FlowVPN.ico" CopyToOutputDirectory="PreserveNewest" />
     <Content Include="UpdateChannels.json" CopyToOutputDirectory="PreserveNewest" />
     <EmbeddedResource Include="engine.lock.json" />

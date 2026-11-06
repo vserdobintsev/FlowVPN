@@ -48,6 +48,27 @@ internal static class CoreLaunchChecks
         check(rootRejected && Store.Root == AppContext.BaseDirectory && !handoff.Contains("--root"), "MSIX rejects engine-root overrides and does not forward them across UAC");
 #else
         check(handoff.Take(2).SequenceEqual(new[] { "--root", Store.Root }), "Portable isolated checks retain their explicitly selected root across elevation");
+        string originalRoot = Store.Root, originalBinary = Store.Bin, originalCoreDirectory = Store.CoreDirectory;
+        string dataRoot = Path.Combine(Store.Run, "data-root-check-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(Path.Combine(dataRoot, "core"));
+        File.WriteAllText(Path.Combine(dataRoot, "core", "sing-box.exe"), "This fixture must never become an executable path.");
+        try
+        {
+            Entry.ConfigureRoot(["--root", dataRoot]);
+            check(Store.Data == Path.Combine(dataRoot, "data") && Store.Bin == originalBinary && Store.CoreDirectory == originalCoreDirectory,
+                "Portable root overrides isolate data without changing the bundled engine path");
+            var start = new ProcessStartInfo { UseShellExecute = false, CreateNoWindow = true, RedirectStandardOutput = true, RedirectStandardError = true };
+            start.ArgumentList.Add("version");
+            using var core = CoreIntegrity.Start(start);
+            bool exited = core.Process.WaitForExit(5000);
+            check(exited && core.Process.ExitCode == 0 && start.FileName == originalBinary && start.WorkingDirectory == originalCoreDirectory,
+                "A fake engine in the data root cannot replace the bundled executable or its working directory");
+        }
+        finally
+        {
+            Store.Root = originalRoot;
+            Directory.Delete(dataRoot, true);
+        }
 #endif
     }
 }
