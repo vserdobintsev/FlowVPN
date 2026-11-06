@@ -11,14 +11,7 @@ internal sealed class PresetDefinition
     public string ParentId { get; set; } = "";
     public List<string> LegacyGroupIds { get; set; } = [];
     public string ProfileIcon { get; set; } = "network";
-    public bool DefaultSelection
-    {
-        get; set;
-    }
-    public bool CreateProfile
-    {
-        get; set;
-    }
+    public bool RecommendedProfile { get; set; }
     public List<PresetComponent> Components { get; set; } = [];
     public List<string> IconFiles { get; set; } = [];
 }

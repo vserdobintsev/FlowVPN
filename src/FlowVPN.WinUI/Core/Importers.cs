@@ -268,7 +268,6 @@ public static class Importers
                     notes.Add("Outline: в локальном хранилище не найдены сохранённые серверы.");
             }
             catch (Exception e) { notes.Add("Не удалось прочитать Outline: " + e.Message); }
-        Store.SeedProfiles(settings);
         return (count, notes);
     }
     public static async Task<VpnSource> DynamicOutline(string input, CancellationToken token = default)
@@ -298,8 +297,22 @@ public static class Importers
             throw new InvalidDataException("JSON Shadowsocks должен содержать объект с параметрами подключения.");
         var fields = new HashSet<string>(StringComparer.Ordinal);
         foreach (var property in root.EnumerateObject())
-            if (property.Name is not ("server" or "server_port" or "method" or "password") || !fields.Add(property.Name))
-                throw new InvalidDataException("JSON Shadowsocks содержит повторные или неподдерживаемые поля. Параметры не были отброшены: импорт остановлен.");
+            if (!fields.Add(property.Name))
+                throw new InvalidDataException("JSON Shadowsocks содержит повторяющиеся поля. Удалите дубликаты в конфигурации или обратитесь к поставщику ключа.");
+        if (fields.Contains("error"))
+            throw new InvalidDataException("Сервис Outline вернул сообщение об ошибке вместо параметров подключения. Проверьте срок действия ключа и доступность услуги у поставщика.");
+        if (fields.Contains("transport") || fields.Contains("$type"))
+            throw new InvalidDataException("Этот ключ Outline использует расширенный транспорт, который эта версия FlowVPN не поддерживает. Используйте совместимый ключ Shadowsocks или подключение OpenVPN.");
+        if (fields.Any(field => field is not ("server" or "server_port" or "method" or "password" or "prefix")))
+            throw new InvalidDataException("JSON Shadowsocks содержит неподдерживаемые поля. Импорт остановлен, чтобы не изменить параметры подключения.");
+        if (root.TryGetProperty("prefix", out var prefix))
+        {
+            if (prefix.ValueKind != JsonValueKind.String)
+                throw new InvalidDataException("Поле prefix в JSON Shadowsocks должно быть строкой.");
+            // Only the exact empty string is a no-op. Even whitespace changes transport bytes.
+            if (prefix.GetString()!.Length != 0)
+                throw new InvalidDataException("Ключ Outline использует непустой префикс Shadowsocks. Эта версия движка его не поддерживает. Используйте совместимый ключ без префикса или подключение OpenVPN.");
+        }
         string Value(string key, bool allowEmpty = false) => root.TryGetProperty(key, out var value) && value.ValueKind == JsonValueKind.String &&
             value.GetString() is { } result && (allowEmpty || result.Length > 0)
                 ? result : throw new InvalidDataException("Некорректное поле JSON Shadowsocks: " + key);

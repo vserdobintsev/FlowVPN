@@ -67,11 +67,49 @@ function Check-Boolean($Object, [string[]]$Names) {
         }
     }
 }
+function Check-ApplicationSets($Object) {
+    # Older settings have no saved sets. Unknown application IDs remain portable references.
+    if (!$Object.ContainsKey('ApplicationSets')) { return }
+    Require-Kind $Object['ApplicationSets'] 'Array'
+    $sets = $Object['ApplicationSets'].AsArray()
+    if ($sets.Count -gt 128) { throw 'Too many saved application sets.' }
+    $ids = [Collections.Generic.HashSet[guid]]::new()
+    foreach ($entry in $sets) {
+        Require-Kind $entry 'Object'
+        $item = $entry.AsObject()
+        foreach ($field in $item) {
+            if ($field.Key -cnotin @('Id','Name','Icon','PresetIds')) { throw 'Unsupported saved-set field.' }
+        }
+        Require-Kind $item['Id'] 'String'
+        $id = [guid]::Empty
+        $rawId = $item['Id'].ToString()
+        if ($rawId.Length -gt 68 -or ![guid]::TryParse($rawId, [ref]$id) -or !$ids.Add($id)) { throw 'Invalid or duplicate saved-set identifier.' }
+        Require-Kind $item['Name'] 'String'
+        $name = $item['Name'].ToString()
+        if ([string]::IsNullOrWhiteSpace($name) -or $name.Length -gt 180 -or $name -match '\p{Cc}') { throw 'Invalid saved-set name.' }
+        if ($item.ContainsKey('Icon')) {
+            Require-Kind $item['Icon'] 'String'
+            if ($item['Icon'].ToString() -cnotmatch '\A[A-Za-z0-9][A-Za-z0-9._-]{0,63}\z') { throw 'Invalid saved-set icon.' }
+        }
+        Require-Kind $item['PresetIds'] 'Array'
+        $members = $item['PresetIds'].AsArray()
+        if ($members.Count -lt 1 -or $members.Count -gt 128) { throw 'A saved set must contain between 1 and 128 applications.' }
+        $memberIds = [Collections.Generic.HashSet[string]]::new([StringComparer]::Ordinal)
+        foreach ($member in $members) {
+            Require-Kind $member 'String'
+            $value = $member.ToString()
+            if ($value -cnotmatch '\A[A-Za-z0-9][A-Za-z0-9._-]{0,127}\z' -or !$memberIds.Add($value)) {
+                throw 'Invalid or duplicate application identity in a saved set.'
+            }
+        }
+    }
+}
 function Check-Settings($Settings) {
     Require-Kind $Settings 'Object'
     $object = $Settings.AsObject()
     Check-Strings $object @('BaseDomainCategory', 'SelectedProfileId')
-    Check-Boolean $object @('BaseRulesEnabled', 'AutoUpdateRules', 'StartInTray')
+    Check-Boolean $object @('BaseRulesEnabled', 'AutoUpdateRules', 'StartInTray', 'ProfileOnboardingCompleted')
+    Check-ApplicationSets $object
     foreach ($name in @('Version', 'Appearance')) {
         if ($object.ContainsKey($name)) {
             Require-Kind $object[$name] 'Number'

@@ -25,7 +25,7 @@
       }
     ],
     "ProfileIcon": "code",
-    "DefaultSelection": true
+    "RecommendedProfile": true
   },
   {
     "Id": "telegram",
@@ -44,7 +44,7 @@
       }
     ],
     "ProfileIcon": "chat",
-    "DefaultSelection": true
+    "RecommendedProfile": true
   },
   {
     "Id": "yandex",
@@ -63,8 +63,7 @@
         "ProductContains": "Yandex"
       }
     ],
-    "ProfileIcon": "browser",
-    "CreateProfile": true
+    "ProfileIcon": "browser"
   },
   {
     "Id": "chrome",

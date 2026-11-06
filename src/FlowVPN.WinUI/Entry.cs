@@ -70,7 +70,9 @@ internal static class Entry
             Startup = !utility && !VisualTest && !ReleaseUiTest && StartupIntegration.WasStartupActivation();
             if (!utility)
             {
-                singleton = new Mutex(true, "Local\\FlowVPN-Fluent-" + Environment.UserName + (VisualTest || ReleaseUiTest ? "-test-" + Environment.ProcessId : ""), out bool first);
+                string instance = VisualTest || ReleaseUiTest ? "-test-" + Environment.ProcessId
+                    : Preview && args.Contains("--root") ? "-preview-" + Store.Hash(Path.TrimEndingDirectorySeparator(Store.Root).ToUpperInvariant()) : "";
+                singleton = new Mutex(true, "Local\\FlowVPN-Fluent-" + Environment.UserName + instance, out bool first);
                 if (!first)
                 {
                     if (!Startup)

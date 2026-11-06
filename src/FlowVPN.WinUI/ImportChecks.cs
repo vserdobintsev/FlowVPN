@@ -54,6 +54,31 @@ internal static class ImportChecks
         const string basicOutline = "{\"server\":\"::1\",\"server_port\":23456,\"method\":\"chacha20-ietf-poly1305\",\"password\":\"fixture:password\"}";
         var outline = JsonNode.Parse(Importers.DynamicPayload(basicOutline).ConnectionJson)!;
         check(outline["server"]?.ToString() == "::1" && outline["password"]?.ToString() == "fixture:password", "Dynamic Outline JSON preserves IPv6 hosts and colon-containing passwords");
+        var withoutPrefix = Importers.DynamicPayload(basicOutline);
+        var emptyPrefix = Importers.DynamicPayload(basicOutline.Replace("}", ",\"prefix\":\"\"}"));
+        check(emptyPrefix.ConnectionJson == withoutPrefix.ConnectionJson && emptyPrefix.Fingerprint == withoutPrefix.Fingerprint &&
+            JsonNode.Parse(emptyPrefix.ConnectionJson)!["prefix"] == null, "An exactly empty Outline prefix is a no-op and is never forwarded to the engine");
+        string Failure(string payload)
+        {
+            try { Importers.DynamicPayload(payload); }
+            catch (InvalidDataException error) { return error.Message; }
+            return "";
+        }
+        foreach (string value in new[] { "\" \"", "\"POST \"", "\"\\u0000\"" })
+        {
+            string error = Failure(basicOutline.Replace("}", ",\"prefix\":" + value + "}"));
+            check(error.Contains("непустой префикс", StringComparison.Ordinal) && error.Contains("OpenVPN", StringComparison.Ordinal) && !error.Contains("POST", StringComparison.Ordinal),
+                "Nonempty Outline prefixes, including whitespace and control bytes, get a specific non-disclosing compatibility error");
+        }
+        foreach (string value in new[] { "null", "true", "42", "[]", "{}" })
+            check(Failure(basicOutline.Replace("}", ",\"prefix\":" + value + "}")).Contains("должно быть строкой", StringComparison.Ordinal), "An Outline prefix must be a string, never an implicitly empty JSON value");
+        foreach (string field in new[] { "server", "server_port", "method", "password" })
+            check(Failure(basicOutline.Insert(1, "\"" + field + "\":\"duplicate\",")).Contains("повторяющиеся", StringComparison.Ordinal), "Repeated required Outline fields get a duplicate-field error: " + field);
+        check(Failure(basicOutline.Replace("}", ",\"plugin\":\"fixture-secret\"}")).Contains("неподдерживаемые", StringComparison.Ordinal), "Unknown transport parameters remain rejected separately from duplicate fields");
+        string providerError = Failure("{\"error\":{\"message\":\"fixture-secret\",\"details\":\"https://fixture.invalid/private\"}}");
+        check(providerError.Contains("Сервис Outline", StringComparison.Ordinal) && !providerError.Contains("fixture", StringComparison.Ordinal), "Provider errors are identified without displaying untrusted provider text");
+        string transportError = Failure("{\"transport\":{\"$type\":\"fixture-secret\"}}");
+        check(transportError.Contains("расширенный транспорт", StringComparison.Ordinal) && !transportError.Contains("fixture", StringComparison.Ordinal), "Advanced Outline transports get an explicit non-disclosing compatibility error");
         foreach (string bad in new[] { basicOutline.Replace("}", ",\"prefix\":\"POST \"}"), basicOutline.Replace("23456", "\"23456\""), basicOutline.Replace("::1", "example.test/path") })
         {
             bool rejected = false;

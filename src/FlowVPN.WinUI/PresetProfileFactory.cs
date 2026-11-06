@@ -1,53 +1,78 @@
-using System.Text.Json;
 namespace FlowVPN;
 
+internal sealed record ProfileSuggestion(string Id, string Name, string Description, string Icon,
+    IReadOnlyList<AppRule> Apps, int AppCount)
+{
+    public int RuleCount => Apps.Count;
+}
+
+internal sealed record ProfileCreationResult(int Added, int Duplicates, int Unavailable, bool SourceMissing = false);
+
+// Discovery proposes choices; only an explicit confirmation creates profiles.
 internal static class PresetProfileFactory
 {
-    static List<AppRule> Copy(IEnumerable<AppRule> rules) => JsonSerializer.Deserialize<List<AppRule>>(JsonSerializer.Serialize(rules))!;
-    static List<DetectedPreset> Defaults(IReadOnlyCollection<DetectedPreset> presets) => presets.Where(p => p.Available && p.Definition.DefaultSelection).ToList();
-    static string DefaultName(IReadOnlyCollection<DetectedPreset> presets) => presets.Count == 0 ? "Мои приложения" : string.Join(" + ", presets.Select(p => p.Definition.Name));
-    public static void Seed(Settings settings, IReadOnlyCollection<DetectedPreset> presets)
+    internal const int MaximumSuggestions = ProfileSetCatalog.MaximumSets + ProfileSetCatalog.MaximumMembers + 2;
+
+    public static IReadOnlyList<ProfileSuggestion> Suggestions(Settings settings, IReadOnlyCollection<DetectedPreset> presets)
     {
-        if (settings.Profiles.Count != 0 || settings.Sources.Count == 0)
-            return;
-        var defaults = Defaults(presets);
-        var source = settings.Sources[0];
-        settings.Profiles.Add(new()
+        var entries = ProfileSetCatalog.Entries(settings, presets);
+        var map = presets.DistinctBy(p => p.Definition.Id, StringComparer.Ordinal).ToDictionary(p => p.Definition.Id, StringComparer.Ordinal);
+        var suggestions = new List<ProfileSuggestion>();
+        foreach (var entry in entries.Where(entry => entry.PresetIds.Count > 0 && entry.MissingCount == 0))
         {
-            Name = DefaultName(defaults),
-            SourceId = source.Id,
-            Apps = Copy(defaults.SelectMany(p => p.Rules))
-        });
-        settings.Profiles.Add(new()
-        {
-            Name = "Только базовые правила",
-            SourceId = source.Id
-        });
-        settings.SelectedProfileId = settings.Profiles[0].Id;
-        Complete(settings, presets);
-    }
-    public static void Complete(Settings settings, IReadOnlyCollection<DetectedPreset> presets)
-    {
-        if (settings.Sources.Count == 0)
-            return;
-        var defaults = Defaults(presets);
-        foreach (var source in settings.Sources.Where(s => settings.Profiles.All(p => p.SourceId != s.Id)))
-            settings.Profiles.Add(new()
-            {
-                Name = source.Name + " · " + DefaultName(defaults),
-                SourceId = source.Id,
-                Apps = Copy(defaults.SelectMany(p => p.Rules))
-            });
-        foreach (var preset in presets.Where(p => p.Available && p.Definition.CreateProfile))
-        {
-            if (settings.Profiles.Any(p => p.Apps.Any(a => preset.Rules.Any(r => r.Pattern.Equals(a.Pattern, StringComparison.OrdinalIgnoreCase)))))
-                continue;
-            settings.Profiles.Add(new()
-            {
-                Name = preset.Definition.Name,
-                SourceId = settings.Sources[0].Id,
-                Apps = Copy(preset.Rules)
-            });
+            var rules = CopyDistinct(entry.PresetIds.SelectMany(id => map[id].Components)
+                .Where(component => component.Available && component.Suggested).Select(component => component.Rule));
+            suggestions.Add(new(entry.Id, entry.Name, entry.Description, entry.Icon, rules, entry.PresetIds.Count));
         }
+        if (settings.BaseRulesEnabled)
+            suggestions.Add(new("base-only", "Только базовые правила", "Общая база блокировок без дополнительных приложений.", "rules", [], 0));
+        return suggestions.AsReadOnly();
     }
+
+    public static ProfileCreationResult CreateSelected(Settings settings, string sourceId, IEnumerable<string> selectedIds,
+        IReadOnlyCollection<DetectedPreset> freshPresets)
+    {
+        string[] selected = selectedIds.Take(MaximumSuggestions).Distinct(StringComparer.Ordinal).ToArray();
+        if (!settings.Sources.Any(source => source.Id == sourceId))
+            return new(0, 0, selected.Length, SourceMissing: true);
+
+        // Rebuild from fresh discovery instead of trusting mutable cards from an earlier dialog.
+        var suggestions = Suggestions(settings, freshPresets).ToDictionary(p => p.Id, StringComparer.Ordinal);
+        var existingRules = settings.Profiles.Where(p => p.SourceId == sourceId && p.Mode == "include" && p.Domains.Count == 0)
+            .Select(p => p.Apps.Select(a => a.Pattern).ToHashSet(StringComparer.OrdinalIgnoreCase)).ToList();
+        var names = settings.Profiles.Select(p => p.Name).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        int added = 0, duplicates = 0, unavailable = 0;
+        foreach (string id in selected)
+        {
+            if (!suggestions.TryGetValue(id, out var suggestion))
+            {
+                unavailable++;
+                continue;
+            }
+            var patterns = suggestion.Apps.Select(a => a.Pattern).ToHashSet(StringComparer.OrdinalIgnoreCase);
+            if (existingRules.Any(patterns.SetEquals))
+            {
+                duplicates++;
+                continue;
+            }
+            var profile = new VpnProfile
+            {
+                Name = UniqueNames.Reserve(suggestion.Name, names),
+                SourceId = sourceId,
+                Mode = "include",
+                Icon = suggestion.Icon,
+                Apps = suggestion.Apps.Select(rule => rule.Copy()).ToList()
+            };
+            settings.Profiles.Add(profile);
+            settings.SelectedProfileId = profile.Id;
+            existingRules.Add(patterns);
+            added++;
+        }
+        return new(added, duplicates, unavailable);
+    }
+
+    static IReadOnlyList<AppRule> CopyDistinct(IEnumerable<AppRule> rules) => rules
+        .Where(rule => !string.IsNullOrWhiteSpace(rule.Pattern))
+        .DistinctBy(rule => rule.Pattern, StringComparer.OrdinalIgnoreCase)
+        .Select(rule => rule.Copy()).ToList().AsReadOnly();
 }

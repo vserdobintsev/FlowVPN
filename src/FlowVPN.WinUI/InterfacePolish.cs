@@ -39,7 +39,7 @@ internal sealed partial class FluentWindow
             button.Content = CommandContent(pair.Item2, label);
             AutomationProperties.SetName(button, label);
         }
-        foreach (var pair in new[] { ("NewProfile", "Новый профиль"), ("ThemeButton", "Сменить тему"), ("SourceCombo", "Подключение выбранного профиля"), ("ModeCombo", "Режим маршрутизации"), ("ProfileList", "Профили"), ("AppList", "Приложения профиля"), ("SourceList", "Источники подключения") })
+        foreach (var pair in new[] { ("NewProfile", "Новый профиль"), ("ProfileSuggestionsButton", "Готовые наборы"), ("EmptyNewProfileButton", "Создать профиль"), ("EmptyProfileSuggestionsButton", "Выбрать готовые профили"), ("EmptyAddConnectionButton", "Добавить подключение"), ("ProfileReminderButton", "Выбрать готовые профили"), ("ThemeButton", "Сменить тему"), ("SourceCombo", "Подключение выбранного профиля"), ("ModeCombo", "Режим маршрутизации"), ("ProfileList", "Профили"), ("AppList", "Приложения профиля"), ("SourceList", "Источники подключения") })
         {
             AutomationProperties.SetName(C<DependencyObject>(pair.Item1), pair.Item2);
             ToolTipService.SetToolTip(C<DependencyObject>(pair.Item1), pair.Item2);
@@ -55,8 +55,8 @@ internal sealed partial class FluentWindow
     void UpdateHeading()
     {
         bool general = Page(page).General;
-        C<TextBlock>("ScopeCaption").Text = general ? "ОБЩИЕ ДЛЯ ВСЕХ ПРОФИЛЕЙ" : "ВЫБРАННЫЙ ПРОФИЛЬ";
-        C<TextBlock>("ProfileHeading").Text = general ? "Настройки приложения" : Profile?.Name ?? "Создайте профиль";
+        C<TextBlock>("ScopeCaption").Text = page == 8 ? "БИБЛИОТЕКА ПРИЛОЖЕНИЙ" : general ? "ОБЩИЕ ДЛЯ ВСЕХ ПРОФИЛЕЙ" : "ВЫБРАННЫЙ ПРОФИЛЬ";
+        C<TextBlock>("ProfileHeading").Text = page == 8 ? "Готовые наборы" : general ? "Настройки приложения" : Profile?.Name ?? "Создайте профиль";
     }
     void SetTrayState()
     {

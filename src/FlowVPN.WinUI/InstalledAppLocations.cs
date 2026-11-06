@@ -6,7 +6,6 @@ internal static class InstalledAppLocations
     public static IReadOnlyList<string> PackageDirectories(string name) => Packages.TryGetValue(name, out var paths) ? paths : [];
     public static void Initialize()
     {
-        Store.SeedCatalogProfiles = settings => PresetProfileFactory.Seed(settings, AppPresets.Discover());
         Packages.Clear();
         var requested = AppPresets.Definitions.SelectMany(p => p.Components).Select(c => c.Package).Where(p => p.Length > 0).ToHashSet(StringComparer.OrdinalIgnoreCase);
         try
