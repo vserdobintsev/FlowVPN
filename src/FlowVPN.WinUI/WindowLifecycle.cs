@@ -26,14 +26,6 @@ internal sealed partial class FluentWindow
             }
             finally { closing = true; Close(); Application.Current.Exit(); }
         }
-        else if (Entry.ConnectSelected && !Entry.Preview)
-        {
-            try
-            {
-                await Connect();
-            }
-            catch (Exception e) { await Message(e.Message); }
-        }
         else if (settings.Sources.Count == 0 && !Entry.Preview && !Entry.Startup)
         {
             try
@@ -51,6 +43,7 @@ internal sealed partial class FluentWindow
         windowClosed = true;
         timer.Stop();
         engine.Changed -= EngineChanged;
+        engine.Dispose();
         windowLifetime.Cancel();
         motion.Dispose();
         taskbar.Dispose();

@@ -96,6 +96,8 @@ try {
     if ('runFullTrust' -notin $capabilities -or ('allowElevation' -in $capabilities) -ne ($ExpectedMode -eq 'Release')) { throw 'Unexpected package capabilities' }
     if ($zip.GetEntry('preview-only.flag')) { throw 'A portable preview marker must not be included in MSIX' }
     if (!$zip.GetEntry('coreclr.dll')) { throw 'Self-contained .NET runtime is missing' }
+    $runtimeConfig = [Text.Encoding]::UTF8.GetString((Read-ZipBytes $zip.GetEntry('FlowVPN.runtimeconfig.json'))) | ConvertFrom-Json
+    if ($runtimeConfig.runtimeOptions.configProperties.'System.StartupHookProvider.IsSupported' -ne $false) { throw 'Managed startup hooks must be disabled before the application entry point' }
     $lock = Get-Content -LiteralPath (Join-Path $PSScriptRoot '..\engine.lock.json') -Raw | ConvertFrom-Json
     foreach ($file in $lock.Files.PSObject.Properties) {
         $entry = $zip.GetEntry('core/' + $file.Name)
@@ -119,6 +121,7 @@ try {
         ForbiddenPrivateFileNamesFound = $privateFiles.Count
         PrivateFileScanNote = 'Checks file-name patterns, not the semantic content of every file.'
         HasDotNetRuntime = $true
+        ManagedStartupHooksDisabled = $true
         BundledEngineLockVerified = $true
         CoreVersion = $lock.Version
         Identity = $manifest.Package.Identity.Name

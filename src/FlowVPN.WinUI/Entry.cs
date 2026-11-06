@@ -1,5 +1,3 @@
-using System.Diagnostics;
-using System.Security.Principal;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 
@@ -7,7 +5,7 @@ namespace FlowVPN;
 
 internal static class Entry
 {
-    public static bool Preview, VisualTest, ReleaseUiTest, VerificationFailed, Startup, ConnectSelected;
+    public static bool Preview, VisualTest, ReleaseUiTest, VerificationFailed, Startup;
     internal static void ConfigureRoot(string[] args)
     {
         int root = Array.IndexOf(args, "--root");
@@ -23,40 +21,43 @@ internal static class Entry
         }
 #endif
     }
-    internal static string[] ElevationArguments(int parentId, string userSid)
+    internal static void ValidateUiPrivilege(bool elevated, bool utilityTest)
     {
-        string[] handoff = ["--connect-selected", "--handoff-parent", parentId.ToString(System.Globalization.CultureInfo.InvariantCulture), "--handoff-user-sid", userSid];
 #if FLOWVPN_PACKAGE
-        return handoff;
-#else
-        return ["--root", Store.Root, .. handoff];
+        if (utilityTest)
+            throw new InvalidOperationException("Изолированные проверки доступны только в отдельной сборке разработчика.");
 #endif
-    }
-    internal static void ValidateElevationIdentity(string? expectedSid, string currentSid)
-    {
-        if (expectedSid != null && !string.Equals(expectedSid, currentSid, StringComparison.Ordinal))
-            throw new InvalidOperationException("Для подключения подтвердите права текущей учётной записи Windows. Повышение от имени другого пользователя не поддерживается: настройки защищены вашей учётной записью и не изменены.");
-    }
-    internal static ProcessStartInfo ElevatedStart(string executable, string directory, IEnumerable<string> args)
-    {
-        var start = new ProcessStartInfo(executable) { UseShellExecute = true, Verb = "runas", WorkingDirectory = directory };
-        foreach (var arg in args)
-            start.ArgumentList.Add(arg);
-        return start;
+        if (elevated && !utilityTest)
+            throw new InvalidOperationException("Откройте FlowVPN без прав администратора. Интерфейс и настройки работают от вашей учётной записи; Windows запросит разрешение отдельно при подключении VPN.");
     }
     static Mutex? singleton;
     [STAThread]
     static int Main(string[] args)
     {
+        // The privileged entry point must never initialize user storage or WinUI.
+        if (args.Contains("--broker"))
+            return BrokerHost.Run(args);
+        bool releaseTests = args.Contains("--release-self-test") || args.Contains("--self-test");
+        bool performance = args.Contains("--performance-test");
+        bool updateTests = args.Contains("--update-self-test") || releaseTests;
+        try
+        {
+            ValidateUiPrivilege(Native.IsAdmin, updateTests || performance);
+            if (args.Any(value => value is "--handoff-user-sid" or "--handoff-parent" or "--connect-selected"))
+                throw new ArgumentException("Перезапуск интерфейса с повышением прав больше не поддерживается. Откройте FlowVPN обычным способом.");
+        }
+        catch (Exception error)
+        {
+            if (!updateTests && !performance)
+                System.Windows.Forms.MessageBox.Show(error.Message, "FlowVPN");
+            return 1;
+        }
         try
         {
             ConfigureRoot(args);
             VisualTest = args.Contains("--visual-test");
             ReleaseUiTest = args.Contains("--release-ui-test");
             Preview = args.Contains("--preview") || VisualTest || File.Exists(Path.Combine(Store.Root, "preview-only.flag"));
-            bool releaseTests = args.Contains("--release-self-test") || args.Contains("--self-test");
-            bool performance = args.Contains("--performance-test");
-            bool updateTests = args.Contains("--update-self-test") || releaseTests;
             bool refreshBase = args.Contains("--refresh-base");
             bool utility = updateTests || refreshBase || performance;
 #if FLOWVPN_PACKAGE
@@ -66,27 +67,7 @@ internal static class Entry
 #if FLOWVPN_PACKAGE_PREVIEW
   Preview=true;
 #endif
-            int identityIndex = Array.IndexOf(args, "--handoff-user-sid");
-            if (identityIndex >= 0)
-            {
-                if (identityIndex + 1 >= args.Length)
-                    throw new ArgumentException("Не указан пользователь для повышения прав.");
-                using var identity = WindowsIdentity.GetCurrent();
-                ValidateElevationIdentity(args[identityIndex + 1], identity.User!.Value);
-            }
             Startup = !utility && !VisualTest && !ReleaseUiTest && StartupIntegration.WasStartupActivation();
-            ConnectSelected = args.Contains("--connect-selected") && !Startup && !ReleaseUiTest;
-            int parentIndex = Array.IndexOf(args, "--handoff-parent");
-            if (parentIndex >= 0 && parentIndex + 1 < args.Length && int.TryParse(args[parentIndex + 1], out int parentId))
-            {
-                try
-                {
-                    using var parent = Process.GetProcessById(parentId);
-                    if (string.Equals(Native.ProcessPath(parentId), Environment.ProcessPath, StringComparison.OrdinalIgnoreCase))
-                        parent.WaitForExit(8000);
-                }
-                catch (ArgumentException) { }
-            }
             if (!utility)
             {
                 singleton = new Mutex(true, "Local\\FlowVPN-Fluent-" + Environment.UserName + (VisualTest || ReleaseUiTest ? "-test-" + Environment.ProcessId : ""), out bool first);
@@ -99,6 +80,10 @@ internal static class Entry
             }
             InstalledAppLocations.Initialize();
             Store.Init();
+            // Older releases generated a plaintext runtime file in user storage.
+            // The broker never reads it; remove only this obsolete generated file.
+            if (!utility)
+                File.Delete(Path.Combine(Store.Run, "runtime.json"));
             File.WriteAllText(Path.Combine(Store.Data, "winui-startup-trace.txt"), "Store initialized\n");
             if (utility)
             {
@@ -121,6 +106,7 @@ internal static class Entry
                     {
                         ReleaseChecks.Run().GetAwaiter().GetResult();
                         CoreControlChecks.Run().GetAwaiter().GetResult();
+                        BrokerChecks.Run().GetAwaiter().GetResult();
                         Directory.CreateDirectory(Path.Combine(Store.Root, "design-preview"));
                         FeatureChecks.Run(AppPresets.Discover());
                     }

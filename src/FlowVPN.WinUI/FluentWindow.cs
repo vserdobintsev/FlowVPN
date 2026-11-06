@@ -272,12 +272,9 @@ internal sealed partial class FluentWindow : Window
             throw new InvalidOperationException("Подключение недоступно во время проверки сборки.");
         if (stagingUpdate)
             throw new Exception("Дождитесь подготовки обновления.");
-        if (!Native.IsAdmin)
-        {
-            ElevateForConnection();
-            return;
-        }
         await engine.Connect(settings, Profile);
+        if (windowClosed || !engine.Running)
+            return;
         C<InfoBar>("PendingInfo").IsOpen = false;
         if (settings.AutoUpdateRules && (RuleRepository.Due() || DomainRepository.Due(settings.BaseDomainCategory)))
             await UpdateRules(false);
@@ -461,7 +458,7 @@ internal sealed partial class FluentWindow : Window
             changed |= await DomainRepository.Update(client, settings.BaseDomainCategory);
             UpdateBase();
             if (show)
-                await Message(changed ? "Проверенная база загружена. sing-box автоматически перечитает локальный список." : "Установлена актуальная версия.", "Общая база");
+                await Message(changed ? "Проверенная база загружена. Новые правила применятся при следующем подключении." : "Установлена актуальная версия.", "Общая база");
         }
         catch (Exception e) { if (show) await Message("Предыдущая копия базы сохранена.\n" + e.Message, "Обновление не удалось"); else C<TextBlock>("BaseMetadata").Text = RuleRepository.Description() + "\nНе удалось проверить обновления; используется сохранённая копия."; }
         finally { updating = false; C<Button>("UpdateRulesButton").IsEnabled = true; }
@@ -473,7 +470,7 @@ internal sealed partial class FluentWindow : Window
         var file = Path.Combine(Store.Run, "validation.json");
         try
         {
-            Store.WriteJson(file, ConfigBuilder.Build(settings, Profile, ConfigBuilder.Detect(), 15876));
+            Store.WriteJson(file, await ConfigBuilder.Build(settings, Profile, ConfigBuilder.Detect(), 15876));
             await CoreCli.Run("check", "-c", file);
         }
         finally { File.Delete(file); }

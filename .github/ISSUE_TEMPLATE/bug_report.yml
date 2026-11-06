@@ -12,7 +12,7 @@ body:
     attributes:
       label: Версия FlowVPN
       description: Точный номер из раздела «О приложении» или имя сборки.
-      placeholder: Например, 1.4.1
+      placeholder: Например, 1.4.2
     validations:
       required: true
   - type: input

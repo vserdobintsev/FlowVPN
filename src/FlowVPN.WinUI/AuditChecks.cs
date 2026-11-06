@@ -29,9 +29,11 @@ internal static class AuditChecks
         repeated.GroupName = "Updated group";
         ApplicationGroups.Add(two, [rule, repeated, repeated]);
         check(two.Apps.Count == 1 && two.Apps[0].GroupName == "Updated group", "Rule merge deduplicates case-insensitively across existing and incoming batches while updating metadata");
-        string[] args = ["--root", @"E:\Users\Другой пользователь\Data", "--custom", "a\"b"];
-        var start = Entry.ElevatedStart(@"E:\FlowVPN\FlowVPN.exe", @"E:\Data", args);
-        check(start.ArgumentList.SequenceEqual(args) && start.Verb == "runas", "Elevation preserves argument boundaries, Unicode, quotes and a custom data root");
+        string pipeName = "FlowVPN.Broker." + new string('A', 64), nonce = new('B', 64);
+        var start = BrokerClient.CreateStartInfo(pipeName, nonce, 42);
+        check(start.FileName == Path.Combine(AppContext.BaseDirectory, "FlowVPN.exe") && start.WorkingDirectory == AppContext.BaseDirectory &&
+            start.ArgumentList.SequenceEqual(new[] { "--broker", pipeName, nonce, "42" }) && start.Verb == "runas",
+            "Elevation targets only the bundled broker with structured session arguments");
         string directory = Path.Combine(Store.Run, "atomic-" + Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(directory);
         try

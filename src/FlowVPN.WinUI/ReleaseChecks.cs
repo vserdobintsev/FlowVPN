@@ -27,19 +27,21 @@ internal static class ReleaseChecks
             ConnectionJson = new JsonObject
             {
                 ["type"] = "openvpn-client",
+                ["tag"] = "vpn",
                 ["mode"] = "tls",
                 ["network"] = "udp",
-                ["servers"] = new JsonArray(new JsonObject { ["server"] = "127.0.0.1", ["server_port"] = 1194 }),
+                ["servers"] = new JsonArray(new JsonObject { ["server"] = "127.0.0.1", ["server_port"] = 1194, ["network"] = "udp" }),
                 ["tls"] = tls,
+                ["remote_random"] = false,
                 ["route_no_pull"] = true,
                 ["redirect_gateway"] = false,
                 ["system"] = false,
                 ["domain_resolver"] = "dns-direct"
             }.ToJsonString()
         };
-        var outline = new VpnSource { Name = "Fixture", Kind = "Outline", ConnectionJson = new JsonObject { ["type"] = "shadowsocks", ["server"] = "127.0.0.1", ["server_port"] = 23456, ["method"] = "chacha20-ietf-poly1305", ["password"] = "compatibility-test-only" }.ToJsonString() };
-        string ruleJson = Path.Combine(Store.Run, "fixture-rules.json"), ruleSrs = Path.Combine(Store.Rules, "ru-blocked.srs"), config = Path.Combine(Store.Run, "compatibility.json");
-        if (File.Exists(ruleSrs))
+        var outline = new VpnSource { Name = "Fixture", Kind = "Outline", ConnectionJson = new JsonObject { ["type"] = "shadowsocks", ["tag"] = "vpn", ["server"] = "127.0.0.1", ["server_port"] = 23456, ["method"] = "chacha20-ietf-poly1305", ["password"] = "compatibility-test-only", ["domain_resolver"] = "dns-direct" }.ToJsonString() };
+        string ruleJson = Path.Combine(Store.Run, "fixture-rules.json"), decodedRules = Path.Combine(Store.Run, "fixture-rules-decoded.json"), ruleSrs = Path.Combine(Store.Rules, "ru-blocked.srs"), domainRules = DomainRepository.RulePath("ru-blocked"), config = Path.Combine(Store.Run, "compatibility.json");
+        if (File.Exists(ruleSrs) || File.Exists(domainRules))
             throw new InvalidOperationException("Release checks require a fresh isolated --root; an existing rule set must not be replaced.");
         var passed = new List<string>();
         void Check(bool condition, string name)
@@ -51,36 +53,52 @@ internal static class ReleaseChecks
         try
         {
             CoreLaunchChecks.Run(Check);
-            Entry.ValidateElevationIdentity(null, "S-1-5-21-1-2-3-1001");
-            Check(true, "Ordinary startup does not require an elevation handoff");
-            Entry.ValidateElevationIdentity("S-1-5-21-1-2-3-1001", "S-1-5-21-1-2-3-1001");
-            Check(true, "Same-user elevation preserves access to protected settings");
-            bool differentUserRejected = false;
+            Entry.ValidateUiPrivilege(false, false);
+            Check(true, "Ordinary UI startup remains unelevated");
+            Entry.ValidateUiPrivilege(true, true);
+            Check(true, "Explicit headless verification can run on an elevated build runner");
+            bool elevatedUiRejected = false;
             try
             {
-                Entry.ValidateElevationIdentity("S-1-5-21-1-2-3-1001", "S-1-5-21-1-2-3-1002");
+                Entry.ValidateUiPrivilege(true, false);
             }
-            catch (InvalidOperationException) { differentUserRejected = true; }
-            Check(differentUserRejected, "Elevation as another user is rejected before settings initialization");
+            catch (InvalidOperationException) { elevatedUiRejected = true; }
+            Check(elevatedUiRejected, "Elevated ordinary UI is rejected before storage initialization");
             string importedProfile = Path.Combine(Store.Run, "certificate-name-fixture.ovpn");
             try
             {
                 File.WriteAllText(importedProfile, "client\nproto tcp4-client\nremote 127.0.0.1 1194 # fixture\nverify-x509-name \"FlowVPN compatibility fixture\" name\n<ca>\n" + certificate.ExportCertificatePem() + "\n</ca>\n<cert>\n" + certificate.ExportCertificatePem() + "\n</cert>\n<key>\n" + rsa.ExportPkcs8PrivateKeyPem() + "\n</key>\n");
                 var imported = Importers.OpenVpn(importedProfile);
-                Store.WriteJson(config, ConfigBuilder.Build(new Settings { BaseRulesEnabled = false, Sources = [imported] }, new VpnProfile { SourceId = imported.Id }, new("Compatibility adapter", "127.0.0.1"), 15876));
+                Store.WriteJson(config, await ConfigBuilder.Build(new Settings { BaseRulesEnabled = false, Sources = [imported] }, new VpnProfile { SourceId = imported.Id }, new("Compatibility adapter", "127.0.0.1"), 15876));
                 await CoreCli.Run("check", "-c", config);
                 passed.Add("Imported OpenVPN certificate name and TCP4 settings pass the actual pinned engine");
             }
             finally { File.Delete(importedProfile); }
+            foreach (string[] networks in new string[][] { ["192.0.2.0/24"], ["2001:db8::/32"], ["192.0.2.0/24", "2001:db8::/32"] })
+            {
+                Store.WriteJson(ruleJson, new JsonObject { ["version"] = 3, ["rules"] = new JsonArray(new JsonObject { ["ip_cidr"] = new JsonArray(networks.Select(value => JsonValue.Create(value)).ToArray()) }) });
+                await CoreCli.Run("rule-set", "compile", "--output", ruleSrs, ruleJson);
+                await CoreCli.Run("rule-set", "decompile", ruleSrs, "-o", decodedRules);
+                var decoded = JsonNode.Parse(await File.ReadAllTextAsync(decodedRules))!["rules"]!.AsArray();
+                Check(RuleRepository.ParseIpRules(decoded).SequenceEqual(networks), "Pinned engine CIDR decompilation preserves " + string.Join(", ", networks));
+            }
+            foreach (string invalidRule in new[] { "{\"ip_cidr\":\"192.0.2.0/24\",\"domain\":\"example.com\"}", "{\"ip_cidr\":[]}", "{\"ip_cidr\":42}", "{\"ip_cidr\":[\"not-a-network\"]}" })
+            {
+                bool rejected = false;
+                try { RuleRepository.ParseIpRules(new JsonArray(JsonNode.Parse(invalidRule))); }
+                catch (InvalidDataException) { rejected = true; }
+                Check(rejected, "IP rule parser rejects unsupported or invalid input " + invalidRule);
+            }
             File.WriteAllText(ruleJson, "{\"version\":3,\"rules\":[{\"ip_cidr\":[\"192.0.2.0/24\"]}]}");
             await CoreCli.Run("rule-set", "compile", "--output", ruleSrs, ruleJson);
+            File.WriteAllText(domainRules, "{\"version\":3,\"rules\":[{\"domain_suffix\":[\"blocked.example\"]}]}");
             foreach (var source in new[] { openvpn, outline })
                 foreach (bool enabled in new[] { false, true })
                     foreach (string mode in new[] { "include", "exclude", "all" })
                     {
                         var settings = new Settings { BaseRulesEnabled = enabled, Sources = [source] };
                         var profile = new VpnProfile { SourceId = source.Id, Mode = mode, Apps = [AppRule.Folder(@"D:\Apps\Example App")], Domains = ["example.com"] };
-                        Store.WriteJson(config, ConfigBuilder.Build(settings, profile, new("Compatibility adapter", "127.0.0.1"), 15876));
+                        Store.WriteJson(config, await ConfigBuilder.Build(settings, profile, new("Compatibility adapter", "127.0.0.1"), 15876));
                         await CoreCli.Run("check", "-c", config);
                         passed.Add(source.Kind + " / " + mode + " / base=" + enabled);
                     }
@@ -148,6 +166,6 @@ internal static class ReleaseChecks
                 Tests = passed
             }, Store.JsonOptions));
         }
-        finally { foreach (string path in new[] { ruleJson, ruleSrs, config }) if (File.Exists(path)) File.Delete(path); }
+        finally { foreach (string path in new[] { ruleJson, decodedRules, ruleSrs, domainRules, config }) if (File.Exists(path)) File.Delete(path); }
     }
 }

@@ -31,8 +31,6 @@ internal sealed class TaskbarControls : IDisposable
         this.window = window;
         this.command = command;
         subclass = new(window, HandleMessage);
-        // Explorer runs at medium integrity even when the VPN UI was elevated.
-        ChangeWindowMessageFilterEx(window, created, 1, 0);
     }
     nint? HandleMessage(uint message, nint wparam, nint lparam)
     {
@@ -151,8 +149,6 @@ internal sealed class TaskbarControls : IDisposable
     }
     [DefaultDllImportSearchPaths(DllImportSearchPath.System32)]
     [DllImport("user32.dll", CharSet = CharSet.Unicode)] static extern uint RegisterWindowMessage(string message);
-    [DefaultDllImportSearchPaths(DllImportSearchPath.System32)]
-    [DllImport("user32.dll")] static extern bool ChangeWindowMessageFilterEx(nint hwnd, uint message, uint action, nint changeFilter);
     [DefaultDllImportSearchPaths(DllImportSearchPath.System32)]
     [DllImport("user32.dll")] static extern int GetSystemMetricsForDpi(int index, uint dpi);
     [DefaultDllImportSearchPaths(DllImportSearchPath.System32)]
