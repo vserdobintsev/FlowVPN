@@ -4,7 +4,7 @@
 
 ## Сообщить об уязвимости
 
-Напишите на **[vladislav.serdobintsev@gmail.com](mailto:vladislav.serdobintsev@gmail.com)**. Не создавайте публичный issue с рабочим способом эксплуатации, ключами или личными данными. Если в разделе Security репозитория доступна кнопка **Report a vulnerability**, можно использовать её; наличие этого файла само по себе не включает GitHub Private Vulnerability Reporting.
+Используйте **[Report a vulnerability](https://github.com/vserdobintsev/FlowVPN/security/advisories/new)** — в репозитории включён GitHub Private Vulnerability Reporting. Также можно написать на **[vladislav.serdobintsev@gmail.com](mailto:vladislav.serdobintsev@gmail.com)**. Не создавайте публичный issue с рабочим способом эксплуатации, ключами или личными данными.
 
 Полезно указать:
 

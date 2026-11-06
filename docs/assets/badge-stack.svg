@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="138" height="20" viewBox="0 0 138 20" role="img" aria-labelledby="title">
+  <title id="title">Технологии: .NET 10 и WinUI 3</title>
+  <clipPath id="clip"><rect width="138" height="20" rx="3"/></clipPath>
+  <g clip-path="url(#clip)"><path fill="#555" d="M0 0h44v20H0z"/><path fill="#512bd4" d="M44 0h94v20H44z"/></g>
+  <g fill="#fff" text-anchor="middle" font-family="Verdana, DejaVu Sans, sans-serif" font-size="11"><text x="22" y="14">.NET</text><text x="91" y="14">10 · WinUI 3</text></g>
+</svg>
