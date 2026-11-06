@@ -45,7 +45,7 @@ internal sealed partial class FluentWindow
             foreach (var profile in settings.Profiles)
             {
                 Directory.CreateDirectory(Store.ProfileLogs(profile.Id));
-                Store.WriteJson(configPath, ConfigBuilder.Build(settings, profile, new("Release validation", "127.0.0.1"), 15876));
+                Store.WriteJson(configPath, await ConfigBuilder.Build(settings, profile, new("Release validation", "127.0.0.1"), 15876));
                 // 'check' parses the actual profile, but does not create a TUN or contact its server.
                 await CoreCli.Run("check", "-c", configPath);
                 validatedProfiles++;

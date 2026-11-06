@@ -20,17 +20,25 @@ internal static class DomainRuleChecks
         }
         catch (InvalidDataException) { invalid = true; }
         check(invalid, "Category IDs cannot escape the rules directory");
-        var source = new VpnSource { Id = "test", Kind = "Outline", ConnectionJson = "{\"type\":\"shadowsocks\",\"server\":\"127.0.0.1\",\"server_port\":12345,\"method\":\"aes-128-gcm\",\"password\":\"test\"}" };
-        var settings = new Settings { BaseRulesEnabled = false, Sources = [source] };
+        var source = Importers.Outline("ss://YWVzLTEyOC1nY206dGVzdA==@127.0.0.1:12345");
         var profile = new VpnProfile { SourceId = source.Id, Domains = ["example.com", "example.com", "sub.example.com"] };
-        var config = ConfigBuilder.Build(settings, profile, new("test", "127.0.0.1"), 12346);
+        using var control = new CoreControl(12346);
+        JsonObject Build() => BrokerConfig.Build(new BrokerPlan
+        {
+            Kind = source.Kind,
+            ConnectionJson = source.ConnectionJson,
+            Mode = profile.Mode,
+            Domains = DomainCoverage.Effective(profile.Domains, null).ToArray(),
+            ProcessPatterns = profile.Apps.Select(app => app.Pattern).ToArray()
+        }, new("test", "127.0.0.1"), 12346, control, new ProxyAccess());
+        var config = Build();
         var users = config["inbounds"]![1]!["users"]!.AsArray();
         check(users.Count == 1 && users[0]!["password"]!.GetValue<string>().Length == 64, "Every generated manager inbound requires a cryptographically random session password");
         var routeDomains = config["route"]!["rules"]!.AsArray().OfType<JsonObject>().Single(r => r["domain_suffix"] != null)["domain_suffix"]!.AsArray();
         check(routeDomains.Count == 1 && routeDomains[0]!.ToString() == "example.com", "The actual sing-box config contains no duplicate or covered profile domains");
         profile.Mode = "exclude";
         profile.Apps.Add(AppRule.File(@"D:\Example\app.exe"));
-        var excluded = ConfigBuilder.Build(settings, profile, new("test", "127.0.0.1"), 12346);
+        var excluded = Build();
         var dnsRules = excluded["dns"]!["rules"]!.AsArray();
         check(dnsRules[0]?["domain_suffix"] != null && dnsRules[0]?["server"]?.ToString() == "dns-vpn" && dnsRules[1]?["server"]?.ToString() == "dns-direct", "Explicit VPN domains have DNS priority over app exclusions, matching traffic routing priority");
         check(StartupIntegration.Command(@"E:\Тест User\FlowVPN.exe", @"E:\Data\", true).Contains("--startup") && !StartupIntegration.Command("app.exe", "data", false).Contains("--connect-selected"), "Startup registration never requests automatic VPN connection");

@@ -17,6 +17,8 @@ runtime.json
 
 # IDE, build and distribution outputs
 .idea/
+__pycache__/
+*.py[cod]
 **/AppPackages/
 **/TestResults/
 artifacts/

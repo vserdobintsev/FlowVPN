@@ -32,7 +32,7 @@ foreach ($file in $files) {
         try { $document = [Text.Json.JsonDocument]::Parse([IO.File]::ReadAllText($file.FullName)); $document.Dispose() }
         catch { $failures.Add("Invalid JSON: $relative") }
     }
-    if ($file.Extension -in @('.cs', '.ps1', '.cmd', '.yml', '.yaml', '.json', '.md', '.txt', '.xml', '.xaml', '.config', '.csproj')) {
+    if ($file.Extension -in @('.cs', '.ps1', '.py', '.cmd', '.yml', '.yaml', '.json', '.md', '.txt', '.xml', '.xaml', '.config', '.csproj')) {
         $text = [IO.File]::ReadAllText($file.FullName)
         if ($text -match '-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----|gh[pousr]_[A-Za-z0-9]{30,}|github_pat_[A-Za-z0-9_]{30,}|sk-[A-Za-z0-9]{30,}') {
             $failures.Add("Possible secret: $relative")

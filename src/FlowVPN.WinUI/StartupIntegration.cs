@@ -131,18 +131,4 @@ internal sealed partial class FluentWindow
         if (Entry.Startup && settings.StartInTray)
             AppWindow.Hide();
     }
-    void ElevateForConnection()
-    {
-        if (Entry.ReleaseUiTest)
-            throw new InvalidOperationException("Подключение недоступно во время проверки сборки.");
-        Store.Save(settings);
-        using var identity = System.Security.Principal.WindowsIdentity.GetCurrent();
-        var args = Entry.ElevationArguments(Environment.ProcessId, identity.User!.Value);
-        using var launched = Process.Start(Entry.ElevatedStart(Environment.ProcessPath!, AppContext.BaseDirectory, args));
-        if (launched == null)
-            throw new InvalidOperationException("Не удалось запустить VPN с нужными правами.");
-        closing = true;
-        Close();
-        Application.Current.Exit();
-    }
 }

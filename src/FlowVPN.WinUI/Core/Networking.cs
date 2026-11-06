@@ -10,7 +10,6 @@ namespace FlowVPN;
 public record Uplink(string Name, string Dns);
 public static class ConfigBuilder
 {
-    static JsonArray A(IEnumerable<string> values) => new(values.Select(x => JsonValue.Create(x)).ToArray());
     public static Uplink Detect()
     {
         var all = NetworkInterface.GetAllNetworkInterfaces().Where(n => n.OperationalStatus == OperationalStatus.Up && (n.NetworkInterfaceType == NetworkInterfaceType.Wireless80211 || n.NetworkInterfaceType == NetworkInterfaceType.Ethernet)).Where(n => !System.Text.RegularExpressions.Regex.IsMatch(n.Name + " " + n.Description, "TAP|TUN|DCO|VPN|Virtual|Hyper-V|VMware|WireGuard|Outline", System.Text.RegularExpressions.RegexOptions.IgnoreCase)).ToList();
@@ -24,72 +23,47 @@ public static class ConfigBuilder
         }
         throw new Exception("Не найдено физическое подключение с IPv4-шлюзом. Подключите Wi-Fi или Ethernet.");
     }
-    public static JsonObject Build(Settings settings, VpnProfile profile, Uplink link, int proxyPort, CoreControl? control = null, ProxyAccess? proxyAccess = null)
+    public static async Task<JsonObject> Build(Settings settings, VpnProfile profile, Uplink link, int proxyPort, CoreControl? control = null, ProxyAccess? proxyAccess = null)
     {
-        var baseDomains = settings.BaseRulesEnabled ? DomainRepository.Current(settings.BaseDomainCategory) : null;
-        var domains = DomainCoverage.Effective(profile.Domains, baseDomains);
-        var source = settings.Sources.FirstOrDefault(s => s.Id == profile.SourceId) ?? throw new Exception("Выберите источник подключения.");
-        var target = JsonNode.Parse(source.ConnectionJson)!.AsObject();
-        target["tag"] = "vpn";
-        var dnsRules = new JsonArray();
-        if (domains.Count > 0)
-            dnsRules.Add(new JsonObject { ["domain_suffix"] = A(domains), ["server"] = "dns-vpn" });
-        if (profile.Apps.Count > 0)
-            dnsRules.Add(new JsonObject { ["process_path_regex"] = A(profile.Apps.Select(a => a.Pattern)), ["server"] = profile.Mode == "exclude" && !settings.BaseRulesEnabled ? "dns-direct" : "dns-vpn" });
-        var rules = new JsonArray { new JsonObject { ["inbound"] = A(["manager"]), ["action"] = "route", ["outbound"] = "vpn" }, new JsonObject { ["action"] = "sniff" }, new JsonObject { ["protocol"] = "dns", ["action"] = "hijack-dns" } };
-        if (settings.BaseRulesEnabled)
-            rules.Add(new JsonObject { ["rule_set"] = A(["ru-blocked"]), ["action"] = "route", ["outbound"] = "vpn" });
-        if (baseDomains != null)
-            rules.Add(new JsonObject { ["rule_set"] = A(["ru-domains"]), ["action"] = "route", ["outbound"] = "vpn" });
-        rules.Add(new JsonObject { ["ip_is_private"] = true, ["action"] = "route", ["outbound"] = "direct" });
-        if (domains.Count > 0)
-            rules.Add(new JsonObject { ["domain_suffix"] = A(domains), ["action"] = "route", ["outbound"] = "vpn" });
-        if (profile.Apps.Count > 0 && profile.Mode != "all")
-            rules.Add(new JsonObject { ["process_path_regex"] = A(profile.Apps.Select(a => a.Pattern)), ["action"] = "route", ["outbound"] = profile.Mode == "exclude" ? "direct" : "vpn" });
-        var route = new JsonObject { ["auto_detect_interface"] = false, ["default_interface"] = link.Name, ["default_domain_resolver"] = "dns-direct", ["rules"] = rules, ["final"] = profile.Mode == "include" ? "direct" : "vpn" };
-        if (settings.BaseRulesEnabled)
-            route["rule_set"] = new JsonArray { new JsonObject { ["type"] = "local", ["tag"] = "ru-blocked", ["format"] = "binary", ["path"] = Path.Combine(Store.Rules, "ru-blocked.srs") } };
-        if (baseDomains != null)
-            route["rule_set"]!.AsArray().Add(new JsonObject { ["type"] = "local", ["tag"] = "ru-domains", ["format"] = "source", ["path"] = DomainRepository.RulePath(settings.BaseDomainCategory) });
-        var outbounds = new JsonArray { new JsonObject { ["type"] = "direct", ["tag"] = "direct" } };
-        var endpoints = new JsonArray();
-        if (source.Kind == "OpenVPN")
-            endpoints.Add(target);
-        else
-            outbounds.Add(target);
-        var config = new JsonObject
-        {
-            ["log"] = new JsonObject { ["level"] = "info", ["timestamp"] = true, ["output"] = Path.Combine(Store.ProfileLogs(profile.Id), "sing-box.log") },
-            ["dns"] = new JsonObject { ["servers"] = new JsonArray { new JsonObject { ["type"] = "udp", ["tag"] = "dns-direct", ["server"] = link.Dns, ["server_port"] = 53 }, new JsonObject { ["type"] = "https", ["tag"] = "dns-vpn", ["server"] = "1.1.1.1", ["server_port"] = 443, ["path"] = "/dns-query", ["detour"] = "vpn", ["tls"] = new JsonObject { ["enabled"] = true, ["server_name"] = "cloudflare-dns.com" } } }, ["rules"] = dnsRules, ["final"] = settings.BaseRulesEnabled || profile.Mode != "include" ? "dns-vpn" : "dns-direct", ["strategy"] = "ipv4_only" },
-            ["inbounds"] = new JsonArray { new JsonObject { ["type"] = "tun", ["tag"] = "flow-tun", ["interface_name"] = "FlowVPN", ["address"] = A(["172.30.254.1/30", "fd72:9b63:7a11::1/126"]), ["mtu"] = 1400, ["auto_route"] = true, ["strict_route"] = false, ["dns_mode"] = "native", ["stack"] = "mixed" }, new JsonObject { ["type"] = "mixed", ["tag"] = "manager", ["listen"] = "127.0.0.1", ["listen_port"] = proxyPort } },
-            ["endpoints"] = endpoints,
-            ["outbounds"] = outbounds,
-            ["route"] = route
-        };
-        config["inbounds"]![1]!["users"] = (proxyAccess ?? new ProxyAccess()).Users();
-        if (control != null)
-            config["experimental"] = control.Configuration();
-        return config;
+        var plan = await BrokerPlanBuilder.Create(settings, profile);
+        using var ownedControl = control is null ? new CoreControl(proxyPort) : null;
+        return BrokerConfig.Build(plan, link, proxyPort, control ?? ownedControl!, proxyAccess ?? new ProxyAccess());
     }
 }
 public static class CoreCli
 {
-    public static async Task<string> Run(params string[] args)
+    public static Task<string> Run(params string[] args) => Run(CancellationToken.None, args);
+
+    public static async Task<string> Run(CancellationToken token, params string[] args)
     {
         var info = new ProcessStartInfo { UseShellExecute = false, CreateNoWindow = true, RedirectStandardOutput = true, RedirectStandardError = true };
         info.ArgumentList.Add("--disable-color");
         foreach (var a in args)
             info.ArgumentList.Add(a);
-        using var verifiedCore = await Task.Run(() => CoreIntegrity.Start(info));
+        using var verifiedCore = await Task.Run(() => CoreIntegrity.Start(info), token).ConfigureAwait(false);
         var process = verifiedCore.Process;
         var stdout = process.StandardOutput.ReadToEndAsync();
         var stderr = process.StandardError.ReadToEndAsync();
+        using var deadline = CancellationTokenSource.CreateLinkedTokenSource(token);
+        deadline.CancelAfter(TimeSpan.FromSeconds(25));
         try
         {
-            await process.WaitForExitAsync().WaitAsync(TimeSpan.FromSeconds(25));
+            await process.WaitForExitAsync(deadline.Token).ConfigureAwait(false);
+            token.ThrowIfCancellationRequested();
         }
-        catch { process.Kill(); throw; }
-        string result = (await stdout) + "\n" + (await stderr);
+        catch (Exception error)
+        {
+            // Cancellation owns the child until it exits. In particular, the caller may
+            // delete decompile fixtures only after this task has completed.
+            if (!process.HasExited) process.Kill();
+            await process.WaitForExitAsync().ConfigureAwait(false);
+            try { await Task.WhenAll(stdout, stderr).ConfigureAwait(false); }
+            catch (IOException) { }
+            if (error is OperationCanceledException && !token.IsCancellationRequested)
+                throw new TimeoutException("sing-box не завершил операцию за 25 секунд.", error);
+            throw;
+        }
+        string result = (await stdout.ConfigureAwait(false)) + "\n" + (await stderr.ConfigureAwait(false));
         if (process.ExitCode != 0)
             throw new Exception(result.Trim());
         return result.Trim();
@@ -136,6 +110,41 @@ public static class RuleRepository
         }
         catch (IOException) { return false; }
     }
+    internal static string[] ParseIpRules(JsonArray rules, CancellationToken token = default)
+    {
+        const int maxTerms = 2_000_000;
+        if (rules.Count is 0 or > maxTerms)
+            throw new InvalidDataException("Пустая или слишком большая таблица IP-подсетей.");
+        var cidrs = new List<string>();
+        foreach (var rule in rules)
+        {
+            token.ThrowIfCancellationRequested();
+            if (rule is not JsonObject fields || fields.Count != 1 || !fields.TryGetPropertyValue("ip_cidr", out var value))
+                throw new InvalidDataException("Некорректная таблица IP-подсетей: разрешено только поле ip_cidr.");
+            // sing-box decompiles a single CIDR as a string and multiple CIDRs as an array.
+            if (value is JsonArray { Count: > 0 } values)
+            {
+                if ((long)cidrs.Count + values.Count > maxTerms)
+                    throw new InvalidDataException("Таблица IP-подсетей превышает допустимое число правил.");
+                foreach (var item in values)
+                    Add(item);
+            }
+            else if (value is JsonValue)
+                Add(value);
+            else
+                throw new InvalidDataException("Некорректное значение ip_cidr: ожидается строка или непустой массив строк.");
+        }
+        return cidrs.ToArray();
+
+        void Add(JsonNode? value)
+        {
+            token.ThrowIfCancellationRequested();
+            if (cidrs.Count >= maxTerms || value is not JsonValue item || !item.TryGetValue<string>(out var text) ||
+                text.Length is 0 or > 64 || !IPNetwork.TryParse(text, out _))
+                throw new InvalidDataException("Некорректная IP-подсеть или превышен допустимый размер таблицы.");
+            cidrs.Add(text);
+        }
+    }
     public static async Task<bool> Update(HttpClient client)
     {
         using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(45));
@@ -159,15 +168,11 @@ public static class RuleRepository
         try
         {
             await File.WriteAllBytesAsync(candidate, data);
-            await CoreCli.Run("rule-set", "decompile", candidate, "-o", decoded);
+            await CoreCli.Run(token, "rule-set", "decompile", candidate, "-o", decoded);
             var parsed = JsonNode.Parse(await File.ReadAllTextAsync(decoded));
-            if (parsed?["rules"] is not JsonArray array || array.Count == 0)
+            if (parsed is not JsonObject root || root.Any(p => p.Key is not ("version" or "rules")) || root["rules"] is not JsonArray array)
                 throw new Exception("Получен пустой список.");
-            foreach (var rule in array)
-            {
-                if (rule is not JsonObject r || r.Count != 1 || r["ip_cidr"] is not JsonArray ips || ips.Count == 0)
-                    throw new Exception("Репозиторий изменил формат: ожидаются только IP-подсети.");
-            }
+            _ = ParseIpRules(array, token);
             Store.Atomic(Path.Combine(Store.Rules, "ru-blocked.srs"), data);
             Store.WriteJson(MetaPath, new JsonObject { ["repository"] = Repository, ["url"] = url, ["revision"] = revision, ["fetched"] = DateTimeOffset.UtcNow.ToString("O"), ["bytes"] = data.Length, ["sha256"] = Convert.ToHexString(SHA256.HashData(data)) });
             return true;
@@ -175,190 +180,206 @@ public static class RuleRepository
         finally { File.Delete(candidate); File.Delete(decoded); }
     }
 }
-public sealed class VpnEngine
+public sealed class VpnEngine : IDisposable
 {
-    public IWebProxy? Proxy
-    {
-        get; private set;
-    }
-    CoreControl? control;
-    public CoreSnapshot? Snapshot
-    {
-        get; private set;
-    }
+    public IWebProxy? Proxy { get; private set; }
+    public CoreSnapshot? Snapshot { get; private set; }
     public string ControlError { get; private set; } = "";
-    public VpnHealth Health { get; private set; } = VpnHealth.Stopped; public bool Healthy => Running && Health == VpnHealth.Online;
-    Process? process; CoreIntegrity? verifiedCore; CoreJob? job; CancellationTokenSource? monitor; public bool Running => process != null && !process.HasExited; public bool Busy
-    {
-        get; private set;
-    }
-    public string Status { get; private set; } = "Отключено"; public string? ActiveProfile
-    {
-        get; private set;
-    }
-    public string? ActiveProfileId
-    {
-        get; private set;
-    }
-    public int ProxyPort
-    {
-        get; private set;
-    }
+    public VpnHealth Health { get; private set; } = VpnHealth.Stopped;
+    public bool Healthy => Running && Health == VpnHealth.Online;
+    public bool Running => running && broker is { IsClosed: false };
+    public bool Busy { get; private set; }
+    public string Status { get; private set; } = "Отключено";
+    public string? ActiveProfile { get; private set; }
+    public string? ActiveProfileId { get; private set; }
+    public int ProxyPort { get; private set; }
     public event Action? Changed;
-    readonly SemaphoreSlim gate = new(1, 1);
-    readonly SemaphoreSlim logGate = new(1, 1);
-    void Set(string status)
+    BrokerClient? broker;
+    CancellationTokenSource? session;
+    readonly CancellationTokenSource lifetime = new();
+    readonly SemaphoreSlim gate = new(1, 1), logGate = new(1, 1);
+    readonly EventHandler processExit;
+    bool running, stopping;
+    string? sessionFailure;
+    int disposed;
+
+    public VpnEngine()
     {
-        Status = status;
-        Changed?.Invoke();
+        processExit = (_, _) => Dispose();
+        AppDomain.CurrentDomain.ProcessExit += processExit;
     }
+    void Set(string status) { Status = status; Changed?.Invoke(); }
     public HttpClient Client()
     {
         if (!Running)
-            throw new Exception("Сначала подключите VPN, чтобы обновить список через него.");
+            throw new InvalidOperationException("Сначала подключите VPN, чтобы обновить список через него.");
         return BoundedHttp.Client(TimeSpan.FromSeconds(35), Proxy);
     }
+
     public async Task Connect(Settings settings, VpnProfile profile)
     {
-        // A connection uses an immutable snapshot of the user's choices at invocation time.
         settings = System.Text.Json.JsonSerializer.Deserialize<Settings>(System.Text.Json.JsonSerializer.Serialize(settings))!;
         profile = System.Text.Json.JsonSerializer.Deserialize<VpnProfile>(System.Text.Json.JsonSerializer.Serialize(profile))!;
-        await gate.WaitAsync();
+        await gate.WaitAsync(lifetime.Token);
         try
         {
-            if (Running)
-                return;
+            ObjectDisposedException.ThrowIf(Volatile.Read(ref disposed) != 0, this);
+            if (Running) return;
             Busy = true;
+            await StopInternal();
             Health = VpnHealth.Checking;
+            session = CancellationTokenSource.CreateLinkedTokenSource(lifetime.Token);
+            sessionFailure = null;
+            var token = session.Token;
             Set("Подготовка подключения…");
-            if (!Native.IsAdmin)
-                throw new Exception("Для TUN нужен запуск с правами администратора. Откройте FlowVPN из меню «Пуск».");
+            BrokerClient.EnsureSupported();
             var existingCore = Process.GetProcessesByName("sing-box");
             try
             {
                 if (existingCore.Length > 0)
-                    throw new Exception("Уже работает sing-box. Остановите другой туннель перед подключением.");
+                    throw new InvalidOperationException("Уже работает sing-box. Остановите другой туннель перед подключением.");
             }
             finally { foreach (var other in existingCore) other.Dispose(); }
-            var activeVpn = NetworkInterface.GetAllNetworkInterfaces().Any(n => n.OperationalStatus == OperationalStatus.Up && System.Text.RegularExpressions.Regex.IsMatch(n.Name + " " + n.Description, "TAP|DCO|OpenVPN|Outline|WireGuard", System.Text.RegularExpressions.RegexOptions.IgnoreCase) && n.GetIPProperties().UnicastAddresses.Any(a => a.Address.AddressFamily == AddressFamily.InterNetwork && !a.Address.ToString().StartsWith("169.254.")));
+            bool activeVpn = NetworkInterface.GetAllNetworkInterfaces().Any(n => n.OperationalStatus == OperationalStatus.Up &&
+                System.Text.RegularExpressions.Regex.IsMatch(n.Name + " " + n.Description, "TAP|DCO|OpenVPN|Outline|WireGuard", System.Text.RegularExpressions.RegexOptions.IgnoreCase) &&
+                n.GetIPProperties().UnicastAddresses.Any(a => a.Address.AddressFamily == AddressFamily.InterNetwork && !a.Address.ToString().StartsWith("169.254.")));
             if (activeVpn)
-                throw new Exception("Обнаружен другой активный VPN-адаптер. Отключите OpenVPN Connect / Outline перед запуском.");
-            if (settings.BaseRulesEnabled && !File.Exists(Path.Combine(Store.Rules, "ru-blocked.srs")))
-                throw new Exception("Нет локальной базовой таблицы. Загрузите её в настройках приложения → «База блокировок».");
-            if (settings.BaseRulesEnabled && DomainRepository.Current(settings.BaseDomainCategory) == null)
-                throw new InvalidOperationException("Загрузите выбранную доменную категорию в настройках общей базы.");
-            var link = ConfigBuilder.Detect();
-            var listener = new TcpListener(IPAddress.Loopback, 0);
-            listener.Start();
-            ProxyPort = ((IPEndPoint)listener.LocalEndpoint).Port;
-            listener.Stop();
-            var proxyAccess = new ProxyAccess();
-            Proxy = proxyAccess.At(ProxyPort);
-            var selected = settings.Sources.FirstOrDefault(s => s.Id == profile.SourceId) ?? throw new Exception("Выберите подключение.");
+                throw new InvalidOperationException("Обнаружен другой активный VPN-адаптер. Отключите OpenVPN Connect / Outline перед запуском.");
+            var selected = settings.Sources.FirstOrDefault(source => source.Id == profile.SourceId) ?? throw new InvalidOperationException("Выберите подключение.");
             if (selected.DynamicKey.Length > 0)
             {
                 Set("Обновление динамического ключа Outline…");
-                var updated = await Importers.DynamicOutline(selected.DynamicKey);
+                var updated = await Importers.DynamicOutline(selected.DynamicKey).WaitAsync(token);
                 selected.ConnectionJson = updated.ConnectionJson;
             }
+            var plan = await BrokerPlanBuilder.Create(settings, profile, token);
+            token.ThrowIfCancellationRequested();
             Directory.CreateDirectory(Store.ProfileLogs(profile.Id));
-            string consolePath = Path.Combine(Store.ProfileLogs(profile.Id), "console.log");
-            string config = Path.Combine(Store.Run, "runtime.json");
-            control?.Dispose();
-            control = new CoreControl(ProxyPort);
-            Store.WriteJson(config, ConfigBuilder.Build(settings, profile, link, ProxyPort, control, proxyAccess));
-            await CoreCli.Run("check", "-c", config);
-            string log = Path.Combine(Store.ProfileLogs(profile.Id), "sing-box.log");
-            if (File.Exists(log) && new FileInfo(log).Length > 5000000)
-                File.Move(log, log + ".previous", true);
-            var info = new ProcessStartInfo { UseShellExecute = false, CreateNoWindow = false, WindowStyle = ProcessWindowStyle.Hidden, RedirectStandardError = true, RedirectStandardOutput = true };
-            foreach (var arg in new[] { "--disable-color", "run", "-c", config })
-                info.ArgumentList.Add(arg);
-            if (process != null)
-            {
-                verifiedCore?.Dispose();
-                verifiedCore = null;
-                process = null;
-            }
-            job?.Dispose();
-            job = null;
-            monitor?.Cancel();
-            monitor?.Dispose();
-            monitor = null;
-            verifiedCore = await Task.Run(() => CoreIntegrity.Start(info));
-            process = verifiedCore.Process;
-            job = new CoreJob(process);
-            _ = Capture(process.StandardError, consolePath);
-            _ = Capture(process.StandardOutput, consolePath);
+            var current = new BrokerClient();
+            broker = current;
+            if (Volatile.Read(ref disposed) != 0) { current.Dispose(); token.ThrowIfCancellationRequested(); }
+            Set("Подтвердите разрешение Windows для VPN…");
+            var state = await current.Start(plan, token);
+            if (!state.Running || state.ProxyPort is < 1 or > 65535 || string.IsNullOrWhiteSpace(state.ProxyUsername) ||
+                state.ProxyUsername.Length > 128 || !BrokerWire.IsNonce(state.ProxyPassword) || string.IsNullOrWhiteSpace(state.InterfaceName))
+                throw new InvalidDataException("Процесс VPN не сообщил действующее подключение.");
             ActiveProfile = profile.Name;
             ActiveProfileId = profile.Id;
-            monitor = new();
-            var token = monitor.Token;
+            ProxyPort = state.ProxyPort;
+            Proxy = new WebProxy($"socks5://127.0.0.1:{state.ProxyPort}")
+            {
+                Credentials = new NetworkCredential(state.ProxyUsername, state.ProxyPassword)
+            };
+            running = true;
+            await ApplyState(state, profile.Id, token);
+            // Poll while probing too: the broker must keep receiving liveness requests.
+            _ = WatchState(current, profile.Id, token);
             Set("Проверка VPN-соединения…");
             using var client = Client();
             string? ip = null;
-            for (int i = 0; i < 2 && Running; i++)
+            for (int attempt = 0; attempt < 2 && Running; attempt++)
             {
                 ip = await VpnConnectivity.Probe(client, token);
-                if (ip != null)
-                    break;
+                if (ip != null) break;
                 await Task.Delay(1000, token);
             }
-            if (ip == null)
-                throw new Exception("VPN не прошёл проверку соединения. " + (Running ? "Сервер или интернет недоступен." : "sing-box завершился. Откройте журнал."));
+            token.ThrowIfCancellationRequested();
+            if (ip == null || !Running)
+                throw new InvalidOperationException("VPN не прошёл проверку соединения. Проверьте сервер, интернет и журнал профиля.");
             Health = VpnHealth.Online;
-            Set($"Подключено  •  {ip}");
-            _ = Monitor(process, token);
-            _ = WatchControl(process, control, token);
-            _ = WatchConnectivity(process, link.Name, token);
+            Set("Подключено  •  " + ip);
+            _ = WatchConnectivity(current, state.InterfaceName, token);
         }
-        catch (OperationCanceledException) when (monitor?.IsCancellationRequested == true) { await StopInternal(); }
+        catch (OperationCanceledException) when (session?.IsCancellationRequested == true || lifetime.IsCancellationRequested)
+        {
+            string? failure = sessionFailure;
+            await StopInternal();
+            if (failure != null)
+                throw new InvalidOperationException(failure);
+        }
+        catch (System.ComponentModel.Win32Exception error) when (error.NativeErrorCode == 1223) { await StopInternal(); }
+        catch (BrokerRejectedException error)
+        {
+            if (error.State != null)
+                await ApplyState(error.State, profile.Id, CancellationToken.None);
+            await StopInternal();
+            throw;
+        }
         catch { await StopInternal(); throw; }
-        finally { Busy = false; Changed?.Invoke(); gate.Release(); }
+        finally { Busy = stopping; Changed?.Invoke(); gate.Release(); }
     }
-    async Task Capture(StreamReader reader, string logPath)
+
+    async Task ApplyState(BrokerState state, string profileId, CancellationToken token)
+    {
+        running = state.Running;
+        Snapshot = state.Snapshot;
+        ControlError = state.ControlError;
+        if (state.Logs.Length > 0)
+        {
+            await logGate.WaitAsync(token);
+            try
+            {
+                string path = Path.Combine(Store.ProfileLogs(profileId), "sing-box.log");
+                if (File.Exists(path) && new FileInfo(path).Length > 5_000_000)
+                    File.Move(path, path + ".previous", true);
+                string text = string.Join(Environment.NewLine, state.Logs.Select(line => line.Length > 2000 ? line[..2000] : line)) + Environment.NewLine;
+                await File.AppendAllTextAsync(path, text, token);
+            }
+            catch (Exception error) when (error is IOException or UnauthorizedAccessException)
+            {
+                ControlError = "Не удалось записать журнал профиля";
+            }
+            finally { logGate.Release(); }
+        }
+        Changed?.Invoke();
+    }
+
+    async Task WatchState(BrokerClient current, string profileId, CancellationToken token)
     {
         try
         {
-            string? line;
-            while ((line = await reader.ReadLineAsync()) != null)
+            while (!token.IsCancellationRequested && ReferenceEquals(broker, current))
             {
-                if (line.Length > 2000)
-                    line = line[..2000];
-                await logGate.WaitAsync();
-                try
+                await Task.Delay(TimeSpan.FromSeconds(4), token);
+                var state = await current.State(token);
+                if (token.IsCancellationRequested || !ReferenceEquals(broker, current)) return;
+                await ApplyState(state, profileId, token);
+                if (!state.Running)
                 {
-                    await File.AppendAllTextAsync(logPath, line + Environment.NewLine);
+                    await EndSession(current, "Соединение завершилось. Проверьте журнал.");
+                    return;
                 }
-                finally { logGate.Release(); }
             }
         }
-        catch { }
+        catch (OperationCanceledException) when (token.IsCancellationRequested) { }
+        catch (Exception error)
+        {
+            if (!token.IsCancellationRequested && ReferenceEquals(broker, current))
+            {
+                if (error is BrokerRejectedException { State: { } state })
+                    await ApplyState(state, profileId, CancellationToken.None);
+                await EndSession(current, "Связь с процессом VPN потеряна: " + error.Message);
+            }
+        }
     }
-    async Task Monitor(Process p, CancellationToken token)
+
+    async Task EndSession(BrokerClient current, string status)
     {
+        current.Dispose();
+        sessionFailure = status;
+        CancelSession();
+        await gate.WaitAsync();
         try
         {
-            await p.WaitForExitAsync(token);
-            if (!token.IsCancellationRequested && ReferenceEquals(process, p))
-            {
-                monitor?.Cancel();
-                control?.Dispose();
-                control = null;
-                Snapshot = null;
-                Proxy = null;
-                Health = VpnHealth.Stopped;
-                Set("Соединение завершилось. Проверьте журнал.");
-                File.Delete(Path.Combine(Store.Run, "runtime.json"));
-                ActiveProfile = null;
-                ActiveProfileId = null;
-                Changed?.Invoke();
-            }
+            if (!ReferenceEquals(broker, current)) return;
+            Busy = true;
+            await StopInternal();
+            Set(status);
         }
-        catch (OperationCanceledException) { }
-        catch (Exception e) { if (!token.IsCancellationRequested && ReferenceEquals(process, p)) { Health = VpnHealth.Stopped; Set("Ошибка наблюдения за sing-box: " + e.Message); } }
+        finally { Busy = stopping; Changed?.Invoke(); gate.Release(); }
     }
-    async Task WatchConnectivity(Process session, string originalInterface, CancellationToken token)
+
+    async Task WatchConnectivity(BrokerClient current, string originalInterface, CancellationToken token)
     {
         try
         {
@@ -366,17 +387,12 @@ public sealed class VpnEngine
             while (!token.IsCancellationRequested)
             {
                 await Task.Delay(TimeSpan.FromSeconds(20), token);
-                if (!ReferenceEquals(process, session) || session.HasExited)
-                    return;
+                if (!ReferenceEquals(broker, current) || !Running) return;
                 bool physical = true, same = true;
-                try
-                {
-                    same = ConfigBuilder.Detect().Name == originalInterface;
-                }
+                try { same = ConfigBuilder.Detect().Name == originalInterface; }
                 catch { physical = false; }
                 string? ip = physical && same ? await VpnConnectivity.Probe(client, token) : null;
-                if (token.IsCancellationRequested || !ReferenceEquals(process, session) || session.HasExited)
-                    return;
+                if (token.IsCancellationRequested || !ReferenceEquals(broker, current) || !Running) return;
                 Health = VpnConnectivity.Assess(physical, same, ip != null);
                 Set(Health switch
                 {
@@ -387,76 +403,70 @@ public sealed class VpnEngine
                 });
             }
         }
-        catch (OperationCanceledException) { }
-        catch (Exception e) { if (!token.IsCancellationRequested && ReferenceEquals(process, session)) { Health = VpnHealth.Unreachable; Set("Не удалось проверить туннель: " + e.Message); } }
-    }
-    async Task WatchControl(Process session, CoreControl api, CancellationToken token)
-    {
-        while (!token.IsCancellationRequested)
+        catch (OperationCanceledException) when (token.IsCancellationRequested) { }
+        catch (Exception error)
         {
-            try
+            if (!token.IsCancellationRequested && ReferenceEquals(broker, current))
             {
-                var snapshot = await api.Snapshot(token);
-                if (token.IsCancellationRequested || !ReferenceEquals(process, session) || session.HasExited)
-                    return;
-                Snapshot = snapshot;
-                ControlError = "";
-                Changed?.Invoke();
+                Health = VpnHealth.Unreachable;
+                Set("Не удалось проверить туннель: " + error.Message);
             }
-            catch (OperationCanceledException) when (token.IsCancellationRequested) { return; }
-            catch (Exception e) when (e is HttpRequestException or OperationCanceledException or System.Text.Json.JsonException or InvalidDataException or ObjectDisposedException or InvalidOperationException or FormatException)
-            {
-                if (token.IsCancellationRequested || !ReferenceEquals(process, session))
-                    return;
-                ControlError = "API движка временно недоступен";
-                Snapshot = null;
-                Changed?.Invoke();
-            }
-            try
-            {
-                await Task.Delay(TimeSpan.FromSeconds(4), token);
-            }
-            catch (OperationCanceledException) { return; }
         }
     }
+
     public async Task CloseConnection(string id, CancellationToken token)
     {
-        var api = control ?? throw new InvalidOperationException("Движок не запущен.");
-        await api.CloseConnection(id, token);
-        var snapshot = await api.Snapshot(token);
-        if (ReferenceEquals(control, api))
+        var current = broker ?? throw new InvalidOperationException("Движок не запущен.");
+        try
         {
-            Snapshot = snapshot;
-            Changed?.Invoke();
+            var state = await current.CloseConnection(id, token);
+            if (ReferenceEquals(broker, current) && ActiveProfileId is { } profile)
+                await ApplyState(state, profile, token);
         }
+        catch (BrokerRejectedException error)
+        {
+            if (error.State != null && ActiveProfileId is { } profile)
+                await ApplyState(error.State, profile, CancellationToken.None);
+            throw;
+        }
+    }
+
+    void CancelSession()
+    {
+        try { session?.Cancel(); }
+        catch (ObjectDisposedException) { }
     }
     async Task StopInternal()
     {
-        monitor?.Cancel();
-        monitor?.Dispose();
-        monitor = null;
-        if (process != null)
+        CancelSession();
+        var old = broker;
+        if (old != null)
         {
-            try
-            {
-                await Native.Stop(process);
-            }
-            finally { job?.Dispose(); job = null; verifiedCore?.Dispose(); verifiedCore = null; process = null; }
+            stopping = true;
+            Busy = true;
+            Set("Отключение…");
+            // An in-flight broker command can still be unwinding after IPC closes.
+            // A timeout is not proof that its elevated child has actually stopped.
+            try { await old.Stop(CancellationToken.None); }
+            catch (Exception error) when (old.ExitConfirmed && error is (IOException or InvalidOperationException or OperationCanceledException or System.Text.Json.JsonException)) { }
+            Interlocked.CompareExchange(ref broker, null, old);
         }
+        stopping = false;
+        session?.Dispose();
+        session = null;
+        running = false;
         ActiveProfile = null;
         ActiveProfileId = null;
         Proxy = null;
-        Health = VpnHealth.Stopped;
-        control?.Dispose();
-        control = null;
+        ProxyPort = 0;
         Snapshot = null;
+        Health = VpnHealth.Stopped;
         ControlError = "";
-        File.Delete(Path.Combine(Store.Run, "runtime.json"));
         Set("Отключено");
     }
     public async Task Disconnect()
     {
-        monitor?.Cancel();
+        CancelSession();
         await gate.WaitAsync();
         try
         {
@@ -464,6 +474,17 @@ public sealed class VpnEngine
             Set("Отключение…");
             await StopInternal();
         }
-        finally { Busy = false; Changed?.Invoke(); gate.Release(); }
+        finally { Busy = stopping; Changed?.Invoke(); gate.Release(); }
+    }
+    public void Dispose()
+    {
+        if (Interlocked.Exchange(ref disposed, 1) != 0) return;
+        AppDomain.CurrentDomain.ProcessExit -= processExit;
+        lifetime.Cancel();
+        CancelSession();
+        Interlocked.Exchange(ref broker, null)?.Dispose();
+        running = false;
+        Proxy = null;
+        Snapshot = null;
     }
 }

@@ -3,7 +3,7 @@ using System.Diagnostics;
 using System.Runtime.InteropServices;
 
 namespace FlowVPN;
-// Owned child processes cannot survive an unexpected GUI termination.
+// Kill owned child processes when their owner exits unexpectedly.
 internal sealed class CoreJob : IDisposable
 {
     [StructLayout(LayoutKind.Sequential)]

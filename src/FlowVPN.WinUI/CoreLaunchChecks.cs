@@ -39,15 +39,15 @@ internal static class CoreLaunchChecks
             if (Directory.Exists(moved)) Directory.Delete(moved, true);
         }
 
-        var handoff = Entry.ElevationArguments(123, "S-1-5-21-1-2-3-1001");
-        check(handoff.Contains("--handoff-user-sid") && handoff.Contains("S-1-5-21-1-2-3-1001"), "Elevation retains the same-user identity check");
+        var brokerStart = BrokerClient.CreateStartInfo("FlowVPN.Broker." + new string('A', 64), new string('B', 64), 123);
+        check(brokerStart.ArgumentList.Count == 4 && brokerStart.ArgumentList[0] == "--broker" && !brokerStart.ArgumentList.Contains("--root"),
+            "Broker startup carries only a pipe name, nonce and parent PID, without user paths");
 #if FLOWVPN_PACKAGE
         bool rootRejected = false;
         try { Entry.ConfigureRoot(["--root", Path.GetTempPath()]); }
         catch (ArgumentException) { rootRejected = true; }
-        check(rootRejected && Store.Root == AppContext.BaseDirectory && !handoff.Contains("--root"), "MSIX rejects engine-root overrides and does not forward them across UAC");
+        check(rootRejected && Store.Root == AppContext.BaseDirectory, "MSIX rejects engine-root overrides");
 #else
-        check(handoff.Take(2).SequenceEqual(new[] { "--root", Store.Root }), "Portable isolated checks retain their explicitly selected root across elevation");
         string originalRoot = Store.Root, originalBinary = Store.Bin, originalCoreDirectory = Store.CoreDirectory;
         string dataRoot = Path.Combine(Store.Run, "data-root-check-" + Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(Path.Combine(dataRoot, "core"));
