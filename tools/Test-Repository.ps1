@@ -17,6 +17,7 @@ foreach ($folder in @('.github', 'docs', 'tools', 'src')) {
 }
 
 $sourceCheck = & (Join-Path $projectPath 'Distribution\Test-Source.ps1') -Root $projectPath
+$settingsImportCheck = & (Join-Path $PSScriptRoot 'Test-SettingsImport.ps1') -Root $rootPath
 foreach ($file in $files) {
     $relative = [IO.Path]::GetRelativePath($rootPath, $file.FullName)
     if ($file.Name -match '(?i)^(settings\.dat|runtime\.json|password\.dpapi)$|\.(pfx|p12|ovpn|key|pem|log)$') {
@@ -69,6 +70,7 @@ if ($failures.Count) { throw ($failures -join [Environment]::NewLine) }
     FilesChecked = $files.Count
     LocalLinksChecked = $linkCount
     SourceFilesChecked = $sourceCheck.FilesChecked
+    SettingsImportChecks = $settingsImportCheck.Passed
     PowerShellSyntaxValid = $true
     VersionsMatch = $true
     Note = 'Local hygiene checks; not a security audit, network link checker, or complete Markdown parser.'

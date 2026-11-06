@@ -170,7 +170,7 @@ internal sealed partial class FluentWindow
         else if (result.Result == ContentDialogResult.Secondary)
             await AddShadowsocksConnection();
         else if (result.Sources is { Length: > 0 })
-            SaveConnections(result.Sources);
+            await SaveConnections(result.Sources);
     }
 
     async Task AddShadowsocksConnection()
@@ -196,7 +196,7 @@ internal sealed partial class FluentWindow
                 return Task.FromResult(new[] { source });
             });
             if (result.Sources is { Length: > 0 } && !windowClosed)
-                SaveConnections(result.Sources);
+                await SaveConnections(result.Sources);
         }
         finally { password.Password = ""; }
     }
@@ -328,7 +328,7 @@ internal sealed partial class FluentWindow
                 return sources.ToArray();
             });
             if (result.Sources is { Length: > 0 } && !windowClosed)
-                SaveConnections(result.Sources, unreadable.Concat(failures).ToArray());
+                await SaveConnections(result.Sources, unreadable.Concat(failures).ToArray());
         });
     }
 
@@ -338,9 +338,7 @@ internal sealed partial class FluentWindow
         var result = await Task.Run(() => Importers.Installed(imported), windowLifetime.Token);
         if (windowClosed)
             return;
-        SaveConnections(imported.Sources);
-        if (result.Notes.Count > 0)
-            ConnectionFeedback("Импорт из клиентов завершён", C<InfoBar>("SourceFeedback").Message + "\n" + string.Join("\n", result.Notes.Take(8)), InfoBarSeverity.Informational);
+        await SaveConnections(imported.Sources, importNotes: result.Notes);
     });
 
     async Task WithConnectionImport(Func<Task> action)
@@ -363,8 +361,9 @@ internal sealed partial class FluentWindow
         }
     }
 
-    void SaveConnections(IEnumerable<VpnSource> sources, IReadOnlyList<string>? failures = null)
+    async Task SaveConnections(IEnumerable<VpnSource> sources, IReadOnlyList<string>? failures = null, IReadOnlyList<string>? importNotes = null)
     {
+        bool firstConnection = settings.Sources.Count == 0;
         int added = 0, duplicates = 0;
         VpnSource? selected = null;
         foreach (var source in sources)
@@ -380,7 +379,6 @@ internal sealed partial class FluentWindow
                 selected = settings.Sources.First(item => Store.SameSource(item, source));
             }
         }
-        Store.SeedProfiles(settings);
         Store.Save(settings);
         BindAll();
         SelectPage(2);
@@ -394,8 +392,12 @@ internal sealed partial class FluentWindow
         string summary = $"Добавлено: {added}. Уже существуют: {duplicates}.";
         if (failures is { Count: > 0 })
             summary += " Не добавлены: " + string.Join(", ", failures.Take(8)) + (failures.Count > 8 ? $" и ещё {failures.Count - 8}" : "") + ".";
+        if (importNotes is { Count: > 0 })
+            summary += "\n" + string.Join("\n", importNotes.Take(8));
         string title = added > 0 ? "Подключения добавлены" : duplicates > 0 ? "Подключение уже существует" : "Новых подключений не найдено";
-        ConnectionFeedback(title, summary, failures is { Count: > 0 } ? InfoBarSeverity.Warning : added > 0 ? InfoBarSeverity.Success : InfoBarSeverity.Informational);
+        ConnectionFeedback(title, summary, failures is { Count: > 0 } || importNotes is { Count: > 0 } ? InfoBarSeverity.Warning : added > 0 ? InfoBarSeverity.Success : InfoBarSeverity.Informational);
+        if (firstConnection && added > 0 && settings.Profiles.Count == 0 && !settings.ProfileOnboardingCompleted)
+            await ShowProfileSuggestions(onboarding: true);
     }
 
     void ConnectionFeedback(string title, string message, InfoBarSeverity severity)

@@ -72,6 +72,11 @@ internal sealed partial class FluentWindow : Window
         Closed += CloseResources;
         Hook("SettingsButton", () => { SelectPage(1); return Task.CompletedTask; });
         Hook("NewProfile", NewProfile);
+        Hook("ProfileSuggestionsButton", () => { SelectPage(8); return Task.CompletedTask; });
+        Hook("EmptyNewProfileButton", NewProfile);
+        Hook("EmptyProfileSuggestionsButton", () => ShowProfileSuggestions());
+        Hook("EmptyAddConnectionButton", AddConnection);
+        Hook("ProfileReminderButton", () => ShowProfileSuggestions());
         Hook("ThemeButton", () => { Theme(); return Task.CompletedTask; });
         Hook("BaseBadge", () => { SelectPage(1); return Task.CompletedTask; });
         Hook("ConnectButton", async () => { if (engine.Running || engine.Busy) await Disconnect(); else await Connect(); });
@@ -110,6 +115,7 @@ internal sealed partial class FluentWindow : Window
         HookStartup();
         HookUpdates();
         HookAbout();
+        HookProfileSets();
         DecorateButtons();
         BindAll();
         timer.Start();
@@ -122,6 +128,7 @@ internal sealed partial class FluentWindow : Window
     static TextBlock Text(string text, double size = 14, bool bold = false) => new() { Text = text, FontSize = size, FontWeight = bold ? Microsoft.UI.Text.FontWeights.SemiBold : Microsoft.UI.Text.FontWeights.Normal, TextTrimming = TextTrimming.CharacterEllipsis };
     void BindAll()
     {
+        string? selectedSourceId = Source?.Id;
         bool previous = binding;
         binding = true;
         try
@@ -158,9 +165,11 @@ internal sealed partial class FluentWindow : Window
                 combo.Items.Add(new ComboBoxItem { Content = s.Name + " · " + ConnectionTypeLabel(s), Tag = s.Id });
                 sl.Items.Add(Card(s.Name, ConnectionTypeLabel(s) + " · " + s.Origin, "\uE968", s));
             }
+            sl.SelectedItem = sl.Items.OfType<ListViewItem>().FirstOrDefault(item => (item.Tag as VpnSource)?.Id == selectedSourceId);
             C<InfoBar>("EmptySourcesHint").IsOpen = settings.Sources.Count == 0;
             sl.Visibility = settings.Sources.Count == 0 ? Visibility.Collapsed : Visibility.Visible;
             C<FrameworkElement>("SourceActions").Visibility = sl.Visibility;
+            UpdateProfileOnboarding();
         }
         finally { binding = previous; }
         BindProfile();
@@ -261,7 +270,7 @@ internal sealed partial class FluentWindow : Window
         C<Microsoft.UI.Xaml.Shapes.Ellipse>("StatusDot").Fill = engine.Healthy ? Color(0, 145, 125) : engine.Running ? Color(210, 135, 35) : Color(130, 145, 163);
         C<ProgressRing>("BusyRing").IsActive = busy;
         C<ProgressRing>("BusyRing").Visibility = busy ? Visibility.Visible : Visibility.Collapsed;
-        C<Button>("ConnectButton").IsEnabled = !Entry.Preview && Profile != null && (!busy || engine.Running);
+        C<Button>("ConnectButton").IsEnabled = !Entry.Preview && (engine.Running || !busy && Profile is { } selected && settings.Sources.Any(source => source.Id == selected.SourceId));
         C<TextBlock>("ConnectText").Text = engine.Running ? "Отключить" : busy ? "Подождите…" : "Подключить";
         C<Button>("ApplyButton").IsEnabled = !Entry.Preview && engine.Running && !busy;
         C<Button>("ApplyButton").Visibility = engine.Running ? Visibility.Visible : Visibility.Collapsed;
@@ -294,7 +303,7 @@ internal sealed partial class FluentWindow : Window
         C<Grid>("MainArea").Height = Math.Max(root.ActualHeight, 680);
         compact = root.ActualWidth < 1050;
         C<ColumnDefinition>("SidebarColumn").Width = new GridLength(compact ? 80 : 248);
-        foreach (var n in new[] { "BrandLabel", "ProfilesCaption", "NewProfileText", "SettingsText" })
+        foreach (var n in new[] { "BrandLabel", "ProfilesCaption", "NewProfileText", "ProfileSuggestionsText", "SettingsText" })
             C<FrameworkElement>(n).Visibility = compact ? Visibility.Collapsed : Visibility.Visible;
         foreach (ListViewItem item in C<ListView>("ProfileList").Items)
         {
@@ -356,12 +365,14 @@ internal sealed partial class FluentWindow : Window
     }
     async Task NewProfile()
     {
+        string sourceId = PreferredProfileSource()?.Id ?? "";
         var name = await Prompt("Новый профиль", "Название профиля");
         if (string.IsNullOrWhiteSpace(name))
             return;
-        var p = new VpnProfile { Name = name, SourceId = settings.Sources.FirstOrDefault()?.Id ?? "" };
+        var p = new VpnProfile { Name = name, SourceId = sourceId };
         settings.Profiles.Add(p);
         settings.SelectedProfileId = p.Id;
+        settings.ProfileOnboardingCompleted = true;
         Store.Save(settings);
         BindAll();
         SelectPage(4);

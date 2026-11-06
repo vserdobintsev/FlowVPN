@@ -32,6 +32,8 @@ internal sealed partial class FluentWindow
             if (!Entry.Startup)
                 C<Microsoft.UI.Xaml.Controls.Button>("AddConnectionButton").Focus(FocusState.Programmatic);
         }
+        else if (settings.Profiles.Count == 0)
+            SelectPage(0);
     }
 
     void EngineChanged() => DispatcherQueue.TryEnqueue(() => { if (!windowClosed) UpdateState(); });
@@ -39,6 +41,7 @@ internal sealed partial class FluentWindow
     void CloseResources(object sender, WindowEventArgs args)
     {
         windowClosed = true;
+        DisposeProfileSets();
         timer.Stop();
         engine.Changed -= EngineChanged;
         engine.Dispose();

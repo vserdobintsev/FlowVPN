@@ -58,8 +58,17 @@ public sealed class Settings
     public bool StartInTray { get; set; } = true;
     public int Appearance { get; set; } = 0;
     public string SelectedProfileId { get; set; } = "";
+    public bool ProfileOnboardingCompleted { get; set; }
+    public List<ApplicationSet> ApplicationSets { get; set; } = [];
     public List<VpnSource> Sources { get; set; } = [];
     public List<VpnProfile> Profiles { get; set; } = [];
+}
+public sealed class ApplicationSet
+{
+    public string Id { get; set; } = Guid.NewGuid().ToString("N");
+    public string Name { get; set; } = "";
+    public string Icon { get; set; } = "network";
+    public List<string> PresetIds { get; set; } = [];
 }
 public sealed class UpdatePreferences
 {
@@ -79,7 +88,6 @@ public static class Store
 #else
     public static string Root = AppContext.BaseDirectory;
 #endif
-    public static Action<Settings>? SeedCatalogProfiles;
     public static string? DataDirectory;
     public static string Data => DataDirectory ?? System.IO.Path.Combine(Root, "data");
     public static string CoreDirectory => System.IO.Path.Combine(AppContext.BaseDirectory, "core");
@@ -125,7 +133,6 @@ public static class Store
     }
     public static void WriteJson(string path, JsonNode o) => Atomic(path, Encoding.UTF8.GetBytes(o.ToJsonString(JsonOptions)));
     public static string Hash(string value) => Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(Encoding.UTF8.GetBytes(value)));
-    public static void SeedProfiles(Settings settings) => SeedCatalogProfiles?.Invoke(settings);
     public static bool SameSource(VpnSource left, VpnSource right)
     {
         if (!string.Equals(left.Kind, right.Kind, StringComparison.Ordinal))

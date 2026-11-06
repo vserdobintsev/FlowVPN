@@ -126,16 +126,8 @@ internal static class FeatureChecks
         CatalogRuleMigration.Apply([migratedRule], migrationCatalog);
         var migrated = ApplicationGroups.Create([migratedRule], migrationCatalog);
         Check(migrated.Single().Name == "Addon · Player" && migratedRule.Pattern == original, "Legacy family moves to its new parent without changing network routing");
-        var factorySettings = new Settings { Sources = [new() { Id = "first", Name = "Connection A", Kind = "Any transport" }, new() { Id = "second", Name = "Connection B", Kind = "Different transport" }] };
-        var defaultApp = new DetectedPreset(new PresetDefinition { Id = "a", Name = "Player", DefaultSelection = true }, [new(isolated, isolated.Path)]);
-        PresetProfileFactory.Seed(factorySettings, [defaultApp]);
-        Check(factorySettings.Profiles.Count == 3 && factorySettings.Profiles[0].Name == "Player" && factorySettings.Profiles.Any(p => p.SourceId == "second"), "Initial profiles use catalogue metadata and arbitrary source types");
-        factorySettings.Profiles[0].Name = "My renamed profile";
-        PresetProfileFactory.Seed(factorySettings, [defaultApp]);
-        PresetProfileFactory.Complete(factorySettings, [defaultApp]);
-        Check(factorySettings.Profiles.Count == 3 && factorySettings.Profiles[0].Name == "My renamed profile", "Profile completion is idempotent and preserves user names");
-        factorySettings.Profiles[0].Apps[0].Name = "Changed only here";
-        Check(factorySettings.Profiles.Single(p => p.SourceId == "second").Apps[0].Name != "Changed only here", "Generated profiles own independent rule objects");
+        OnboardingChecks.Run(Check);
+        ProfileSetChecks.Run(Check);
         File.WriteAllText(Path.Combine(Store.Root, "design-preview", "preset-discovery.json"), JsonSerializer.Serialize(presets.Select(p => new { p.Definition.Name, p.Available, Components = p.Components.Where(c => c.Available).Select(c => new { c.Rule.Name, c.Rule.ComponentRole, c.Suggested, c.Rule.Path }) }), Store.JsonOptions));
         AuditChecks.Run(Check);
         DomainRuleChecks.Run(Check);
