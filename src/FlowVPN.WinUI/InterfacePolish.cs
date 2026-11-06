@@ -30,7 +30,7 @@ internal sealed partial class FluentWindow
     };
     void DecorateButtons()
     {
-        foreach (var pair in new[] { ("CheckAppUpdateButton", "\uE72C"), ("PrepareUpdateButton", "\uE896"), ("EditIdentityButton", "\uE70F"), ("DuplicateProfileButton", "\uE8C8"), ("DeleteProfileButton", "\uE74D"), ("ProfileAppsButton", "\uE71D"), ("AddApp", "\uE710"), ("DomainsButton", "\uE774"), ("ApplyButton", "\uE72C"), ("UpdateRulesButton", "\uE72C"), ("ImportClientsButton", "\uE8B5"), ("ImportFileButton", "\uE710"), ("RenameSourceButton", "\uE70F"), ("DeleteSourceButton", "\uE74D"), ("RefreshLogButton", "\uE72C"), ("OpenLogsButton", "\uE8B7"), ("ValidateButton", "\uE73E") })
+        foreach (var pair in new[] { ("CheckAppUpdateButton", "\uE72C"), ("PrepareUpdateButton", "\uE896"), ("EditIdentityButton", "\uE70F"), ("DuplicateProfileButton", "\uE8C8"), ("DeleteProfileButton", "\uE74D"), ("ProfileAppsButton", "\uE71D"), ("AddApp", "\uE710"), ("DomainsButton", "\uE774"), ("ApplyButton", "\uE72C"), ("UpdateRulesButton", "\uE72C"), ("ImportClientsButton", "\uE8B5"), ("AddConnectionButton", "\uE710"), ("RenameSourceButton", "\uE70F"), ("DeleteSourceButton", "\uE74D"), ("RefreshLogButton", "\uE72C"), ("OpenLogsButton", "\uE8B7"), ("ValidateButton", "\uE73E") })
         {
             var button = C<Button>(pair.Item1);
             if (button.Content is not string label)
