@@ -41,7 +41,10 @@ internal sealed partial class FluentWindow
     void CloseResources(object sender, WindowEventArgs args)
     {
         windowClosed = true;
+        DisposeOperations();
         DisposeProfileSets();
+        DisposeModules();
+        DisposeTraffic();
         timer.Stop();
         engine.Changed -= EngineChanged;
         engine.Dispose();
@@ -74,7 +77,7 @@ internal sealed partial class FluentWindow
             if (page == 3)
                 UpdateLog();
             if (!Entry.Preview && settings.AutoUpdateRules && engine.Running && !engine.Busy && !updating
-                && DateTime.Now > nextUpdate && (RuleRepository.Due() || DomainRepository.Due(settings.BaseDomainCategory)))
+                && DateTime.Now > nextUpdate && (RuleRepository.Due() || DomainRepository.Due(BaseDomainSelection.From(settings).Categories)))
             {
                 nextUpdate = DateTime.Now.AddMinutes(30);
                 await UpdateRules(false);

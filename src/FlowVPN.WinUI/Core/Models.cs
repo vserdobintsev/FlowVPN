@@ -15,6 +15,7 @@ public sealed class VpnSource
     public string Kind { get; set; } = "OpenVPN";
     public string DynamicKey { get; set; } = "";
     public string ConnectionJson { get; set; } = "{}";
+    public ModuleTransportDescriptor? Transport { get; set; }
     public string Origin { get; set; } = "";
     public string Fingerprint { get; set; } = "";
     public override string ToString() => $"{Name}  ·  {Kind}";
@@ -53,6 +54,7 @@ public sealed class Settings
     public UpdatePreferences Updates { get; set; } = new();
     public int Version { get; set; } = 1;
     public string BaseDomainCategory { get; set; } = "ru-blocked";
+    public List<string> AdditionalDomainCategories { get; set; } = [];
     public bool BaseRulesEnabled { get; set; } = true;
     public bool AutoUpdateRules { get; set; } = true;
     public bool StartInTray { get; set; } = true;
@@ -114,7 +116,9 @@ public static class Store
     public static Settings Load()
     {
         var f = System.IO.Path.Combine(Data, "settings.dat");
-        return File.Exists(f) ? JsonSerializer.Deserialize<Settings>(Native.Unprotect(File.ReadAllBytes(f))) ?? throw new Exception("Не удалось прочитать настройки.") : new();
+        Settings settings = File.Exists(f) ? JsonSerializer.Deserialize<Settings>(Native.Unprotect(File.ReadAllBytes(f))) ?? throw new Exception("Не удалось прочитать настройки.") : new();
+        BaseDomainSelection.From(settings).ApplyTo(settings);
+        return settings;
     }
     public static void Save(Settings s) => Atomic(System.IO.Path.Combine(Data, "settings.dat"), Native.Protect(JsonSerializer.SerializeToUtf8Bytes(s, JsonOptions)));
     public static void Atomic(string path, byte[] bytes)
@@ -140,8 +144,9 @@ public static class Store
         string? leftKey = left.DynamicKey?.Trim(), rightKey = right.DynamicKey?.Trim();
         if (!string.IsNullOrEmpty(leftKey) || !string.IsNullOrEmpty(rightKey))
             return !string.IsNullOrEmpty(leftKey) && string.Equals(leftKey, rightKey, StringComparison.Ordinal);
-        return (!string.IsNullOrEmpty(left.Fingerprint) && string.Equals(left.Fingerprint, right.Fingerprint, StringComparison.Ordinal)) ||
-            string.Equals(left.ConnectionJson, right.ConnectionJson, StringComparison.Ordinal);
+        return Equals(left.Transport, right.Transport) &&
+            ((!string.IsNullOrEmpty(left.Fingerprint) && string.Equals(left.Fingerprint, right.Fingerprint, StringComparison.Ordinal)) ||
+            string.Equals(left.ConnectionJson, right.ConnectionJson, StringComparison.Ordinal));
     }
     public static bool AddSource(Settings s, VpnSource source)
     {

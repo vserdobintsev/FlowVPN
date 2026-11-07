@@ -1,4 +1,4 @@
-<!-- Заголовок PR — на английском по Conventional Commits, например fix(profiles): preserve selection. Описание — на русском. -->
+<!-- Заголовок PR — на английском по Conventional Commits, например fix(profiles): preserve selection. Описание PR — на русском; заголовок и всё тело каждого коммита — на английском. -->
 
 ## Задача и результат
 

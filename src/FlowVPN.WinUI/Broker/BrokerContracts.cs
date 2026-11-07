@@ -5,12 +5,24 @@ internal sealed class BrokerPlan
 {
     public string Kind { get; set; } = "";
     public string ConnectionJson { get; set; } = "";
+    public BrokerLocalTransport? LocalTransport { get; set; }
     public string Mode { get; set; } = "include";
     public string[] ProcessPatterns { get; set; } = [];
     public string[] Domains { get; set; } = [];
     public bool BaseEnabled { get; set; }
     public string[] IpCidrs { get; set; } = [];
     public BrokerDomainRules? BaseDomains { get; set; }
+}
+
+// The broker builds the loopback outbound itself. No executable path or arbitrary proxy address crosses IPC.
+internal sealed class BrokerLocalTransport
+{
+    public string ModuleId { get; set; } = "";
+    public int ProtocolVersion { get; set; }
+    public int Port { get; set; }
+    public string Username { get; set; } = "";
+    public string Password { get; set; } = "";
+    public string InterfaceName { get; set; } = "";
 }
 
 internal sealed class BrokerDomainRules
@@ -33,6 +45,7 @@ internal sealed class BrokerReply
     public bool Success { get; set; }
     public string? Error { get; set; }
     public BrokerState? State { get; set; }
+    public CoreTrafficSnapshot? Traffic { get; set; }
 }
 
 internal sealed class BrokerState

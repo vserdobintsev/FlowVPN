@@ -15,9 +15,11 @@ namespace FlowVPN;
 
 internal sealed partial class FluentWindow : Window
 {
+    const double WorkspaceContentWidth = 1056;
     readonly Grid root;
     readonly Settings settings;
     readonly VpnEngine engine = new();
+    readonly ModuleManager moduleManager = ModuleManager.Current;
     readonly WinForms.NotifyIcon tray;
     readonly DispatcherTimer timer = new() { Interval = TimeSpan.FromSeconds(4) };
     readonly Motion motion;
@@ -99,7 +101,7 @@ internal sealed partial class FluentWindow : Window
         });
         Hook("ValidateButton", Validate);
         C<ListView>("ProfileList").SelectionChanged += (_, _) => { if (binding) return; settings.SelectedProfileId = Profile?.Id ?? ""; Store.Save(settings); BindProfile(); SelectPage(0); Pending(); UpdateTray(); };
-        C<ComboBox>("SourceCombo").SelectionChanged += (_, _) => { if (binding || Profile == null) return; Profile.SourceId = (C<ComboBox>("SourceCombo").SelectedItem as ComboBoxItem)?.Tag as string ?? ""; Save(); };
+        C<ComboBox>("SourceCombo").SelectionChanged += (_, _) => ChangeProfileSource(C<ComboBox>("SourceCombo"));
         C<ComboBox>("ModeCombo").SelectionChanged += (_, _) => { if (binding || Profile == null) return; Profile.Mode = new[] { "include", "exclude", "all" }[Math.Max(0, C<ComboBox>("ModeCombo").SelectedIndex)]; Save(); UpdateMode(); };
         C<ListView>("AppList").SelectionChanged += (_, _) => C<Button>("RemoveApps").IsEnabled = C<ListView>("AppList").SelectedItems.Count > 0;
         C<ListView>("SourceList").SelectionChanged += (_, _) => { C<Button>("RenameSourceButton").IsEnabled = Source != null; C<Button>("DeleteSourceButton").IsEnabled = Source != null; };
@@ -111,11 +113,14 @@ internal sealed partial class FluentWindow : Window
         C<NavigationView>("SettingsNavigation").SelectionChanged += (_, e) => { if (e.SelectedItem is NavigationViewItem item) SelectPage(int.Parse((string)item.Tag)); };
         Hook("CoreConnectionsButton", ShowCoreConnections);
         HookProfileSettings();
+        HookSettingsContentLayout();
         HookBaseCategories();
         HookStartup();
         HookUpdates();
         HookAbout();
         HookProfileSets();
+        HookModules();
+        HookTraffic();
         DecorateButtons();
         BindAll();
         timer.Start();
@@ -137,6 +142,7 @@ internal sealed partial class FluentWindow : Window
             list.Items.Clear();
             profileLabels.Clear();
             profileDots.Clear();
+            profileSourceLabels.Clear();
             foreach (var p in settings.Profiles)
             {
                 var normal = ProfileNormal(p);
@@ -156,14 +162,14 @@ internal sealed partial class FluentWindow : Window
             }
             if (list.SelectedIndex < 0 && list.Items.Count > 0)
                 list.SelectedIndex = 0;
-            var combo = C<ComboBox>("SourceCombo");
-            combo.Items.Clear();
+            RefreshProfileSourceOptions();
             var sl = C<ListView>("SourceList");
             sl.Items.Clear();
             foreach (var s in settings.Sources)
             {
-                combo.Items.Add(new ComboBoxItem { Content = s.Name + " · " + ConnectionTypeLabel(s), Tag = s.Id });
-                sl.Items.Add(Card(s.Name, ConnectionTypeLabel(s) + " · " + s.Origin, "\uE968", s));
+                string kind = ConnectionTypeLabel(s);
+                string detail = string.IsNullOrWhiteSpace(s.Origin) ? kind : kind + " · " + s.Origin.Trim();
+                sl.Items.Add(Card(s.Name, detail, "\uE968", s));
             }
             sl.SelectedItem = sl.Items.OfType<ListViewItem>().FirstOrDefault(item => (item.Tag as VpnSource)?.Id == selectedSourceId);
             C<InfoBar>("EmptySourcesHint").IsOpen = settings.Sources.Count == 0;
@@ -209,8 +215,7 @@ internal sealed partial class FluentWindow : Window
         {
             var p = Profile;
             C<TextBlock>("ProfileHeading").Text = p?.Name ?? "Создайте профиль";
-            var combo = C<ComboBox>("SourceCombo");
-            combo.SelectedItem = combo.Items.OfType<ComboBoxItem>().FirstOrDefault(i => (string)i.Tag == p?.SourceId);
+            BindProfileSourceSelection(p);
             C<ComboBox>("ModeCombo").SelectedIndex = p?.Mode == "exclude" ? 1 : p?.Mode == "all" ? 2 : 0;
             BindProfileSettings(p);
             BindApplications(p);
@@ -249,9 +254,16 @@ internal sealed partial class FluentWindow : Window
         {
             C<ToggleSwitch>("BaseSwitch").IsOn = settings.BaseRulesEnabled;
             C<ToggleSwitch>("AutoUpdateSwitch").IsOn = settings.AutoUpdateRules;
-            C<TextBlock>("BaseBadgeText").Text = settings.BaseRulesEnabled ? "База включена" : "База выключена";
-            C<Button>("BaseBadge").Opacity = settings.BaseRulesEnabled ? 1 : 0.65;
-            C<TextBlock>("BaseMetadata").Text = RuleRepository.Description() + "\n" + DomainRepository.Description(settings.BaseDomainCategory);
+            string badgeText = settings.BaseRulesEnabled ? "База включена" : "База выключена";
+            C<TextBlock>("BaseBadgeText").Text = badgeText;
+            C<FontIcon>("BaseBadgeIcon").Glyph = settings.BaseRulesEnabled ? "\uE73E" : "\uE738";
+            var badge = C<Button>("BaseBadge");
+            badge.Opacity = 1;
+            if (settings.BaseRulesEnabled) badge.Style = (Style)root.Resources["BaseBadgeEnabledStyle"];
+            else badge.ClearValue(FrameworkElement.StyleProperty);
+            ToolTipService.SetToolTip(badge, badgeText + " для всех профилей. Открыть настройки общей базы.");
+            Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(badge, badgeText + " для всех профилей. Настройки общей базы");
+            C<TextBlock>("BaseMetadata").Text = RuleRepository.Description() + "\n" + DomainRepository.Description(BaseDomainSelection.From(settings).Categories);
             BindBaseCategories();
         }
         finally { binding = previous; }
@@ -275,6 +287,7 @@ internal sealed partial class FluentWindow : Window
         C<Button>("ApplyButton").IsEnabled = !Entry.Preview && engine.Running && !busy;
         C<Button>("ApplyButton").Visibility = engine.Running ? Visibility.Visible : Visibility.Collapsed;
         SetTrayState();
+        UpdateTrafficPage();
     }
     async Task Connect()
     {
@@ -284,11 +297,30 @@ internal sealed partial class FluentWindow : Window
             throw new InvalidOperationException("Подключение недоступно во время проверки сборки.");
         if (stagingUpdate)
             throw new Exception("Дождитесь подготовки обновления.");
-        await engine.Connect(settings, Profile);
+        while (true)
+        {
+            try
+            {
+                await engine.Connect(settings, Profile, async (capability, token) =>
+                {
+                    token.ThrowIfCancellationRequested();
+                    bool available = await EnsureModuleAvailableAsync(capability);
+                    token.ThrowIfCancellationRequested();
+                    return available;
+                });
+                break;
+            }
+            catch (DownloadInterruptedException error)
+            {
+                if (windowClosed || await Dialog("Загрузка прервалась", new TextBlock { Text = error.Message, TextWrapping = TextWrapping.Wrap, MaxWidth = 440 }, "Повторить") != ContentDialogResult.Primary)
+                    return;
+                if (windowClosed || Profile == null) return;
+            }
+        }
         if (windowClosed || !engine.Running)
             return;
         C<InfoBar>("PendingInfo").IsOpen = false;
-        if (settings.AutoUpdateRules && (RuleRepository.Due() || DomainRepository.Due(settings.BaseDomainCategory)))
+        if (settings.AutoUpdateRules && (RuleRepository.Due() || DomainRepository.Due(BaseDomainSelection.From(settings).Categories)))
             await UpdateRules(false);
     }
     async Task Disconnect()
@@ -300,11 +332,39 @@ internal sealed partial class FluentWindow : Window
     {
         if (root.ActualWidth <= 0)
             return;
-        C<Grid>("MainArea").Height = Math.Max(root.ActualHeight, 680);
         compact = root.ActualWidth < 1050;
-        C<ColumnDefinition>("SidebarColumn").Width = new GridLength(compact ? 80 : 248);
+        // Give the navigation the space that would otherwise become a gap beside
+        // the capped workspace, without narrowing forms in a normal-sized window.
+        double sidebarWidth = compact ? 80 : Math.Clamp(root.ActualWidth - WorkspaceContentWidth, 248, 360);
+        var sidebar = C<ColumnDefinition>("SidebarColumn");
+        if (Math.Abs(sidebar.Width.Value - sidebarWidth) > .5)
+            sidebar.Width = new GridLength(sidebarWidth);
+        double contentInset = compact ? 18 : 28;
+        var mainScroll = C<ScrollViewer>("MainScroll");
+        var statusPanel = C<StackPanel>("OperationStatusPanel");
+        statusPanel.Margin = new Thickness(contentInset, 4, 0, 12);
+        statusPanel.HorizontalAlignment = HorizontalAlignment.Left;
+        double viewportHeight = mainScroll.ActualHeight;
+        if (viewportHeight <= 0)
+            viewportHeight = Math.Max(0, root.ActualHeight - (statusPanel.Visibility == Visibility.Visible ? statusPanel.ActualHeight + statusPanel.Margin.Top + statusPanel.Margin.Bottom : 0));
+        var mainArea = C<Grid>("MainArea");
+        // The viewport can still report its previous size during a resize event.
+        double viewportWidth = Math.Max(0, root.ActualWidth - sidebarWidth);
+        double contentWidth = Math.Min(WorkspaceContentWidth, viewportWidth);
+        mainArea.HorizontalAlignment = HorizontalAlignment.Left;
+        if (double.IsNaN(mainArea.Width) || Math.Abs(mainArea.Width - contentWidth) > .5)
+            mainArea.Width = contentWidth;
+        double statusWidth = Math.Max(0, contentWidth - 2 * contentInset);
+        if (double.IsNaN(statusPanel.Width) || Math.Abs(statusPanel.Width - statusWidth) > .5)
+            statusPanel.Width = statusWidth;
+        mainArea.Height = double.NaN;
+        if (Math.Abs(mainArea.MinHeight - viewportHeight) > .5)
+            mainArea.MinHeight = viewportHeight;
         foreach (var n in new[] { "BrandLabel", "ProfilesCaption", "NewProfileText", "ProfileSuggestionsText", "SettingsText" })
             C<FrameworkElement>(n).Visibility = compact ? Visibility.Collapsed : Visibility.Visible;
+        foreach (var name in new[] { "ProfileSuggestionsButton", "SettingsButton" })
+            C<Button>(name).HorizontalContentAlignment = compact ? HorizontalAlignment.Center : HorizontalAlignment.Left;
+        C<StackPanel>("SidebarCommands").Width = compact ? 44 : 212;
         foreach (ListViewItem item in C<ListView>("ProfileList").Items)
         {
             item.MinWidth = 0;
@@ -320,11 +380,14 @@ internal sealed partial class FluentWindow : Window
             pair.Normal.Visibility = compact ? Visibility.Collapsed : Visibility.Visible;
             pair.Compact.Visibility = compact ? Visibility.Visible : Visibility.Collapsed;
         }
-        C<Grid>("MainArea").Padding = new Thickness(compact ? 18 : 28, 20, compact ? 18 : 28, 14);
-        C<ListView>("AppList").MaxHeight = Math.Max(120, root.ActualHeight - 470);
-        C<ListView>("SourceList").MaxHeight = Math.Max(130, root.ActualHeight - 450);
-        C<StackPanel>("SourceCommands").Orientation = root.ActualWidth - (compact ? 80 : 248) < 700 ? Orientation.Vertical : Orientation.Horizontal;
+        mainArea.Padding = new Thickness(contentInset, 20, contentInset, 14);
+        C<ListView>("AppList").MaxHeight = Math.Max(120, viewportHeight - 470);
+        C<ListView>("SourceList").MaxHeight = Math.Max(130, viewportHeight - 450);
+        C<TextBox>("LogText").Height = Math.Max(220, viewportHeight - 480);
+        C<StackPanel>("SourceCommands").Orientation = contentWidth - 2 * contentInset < 700 ? Orientation.Vertical : Orientation.Horizontal;
         C<TextBlock>("ProfileHeading").FontSize = root.ActualWidth < 900 ? 22 : 27;
+        LayoutProfileSettings();
+        LayoutSettingsContent();
         UpdateThemeButton();
         C<StackPanel>("SidebarFooter").Children[1].Visibility = compact ? Visibility.Collapsed : Visibility.Visible;
     }
@@ -338,8 +401,8 @@ internal sealed partial class FluentWindow : Window
     }
     void UpdateThemeButton()
     {
-        string label = theme switch { 1 => "Светлая тема", 2 => "Тёмная тема", _ => "Системная тема" };
-        string glyph = theme == 1 ? "☀" : "◐";
+        string label = root.RequestedTheme switch { ElementTheme.Light => "Светлая тема", ElementTheme.Dark => "Тёмная тема", _ => "Системная тема" };
+        string glyph = root.RequestedTheme == ElementTheme.Light ? "☀" : "◐";
         var button = C<Button>("ThemeButton");
         button.Content = compact ? glyph : glyph + "  " + label;
         ToolTipService.SetToolTip(button, label + " · сменить тему");
@@ -371,20 +434,6 @@ internal sealed partial class FluentWindow : Window
     async Task Message(string text, string title = "FlowVPN")
     {
         await Dialog(title, new TextBlock { Text = text, TextWrapping = TextWrapping.Wrap, MaxWidth = 500 }, "Понятно", false);
-    }
-    async Task NewProfile()
-    {
-        string sourceId = PreferredProfileSource()?.Id ?? "";
-        var name = await Prompt("Новый профиль", "Название профиля");
-        if (string.IsNullOrWhiteSpace(name))
-            return;
-        var p = new VpnProfile { Name = name, SourceId = sourceId };
-        settings.Profiles.Add(p);
-        settings.SelectedProfileId = p.Id;
-        settings.ProfileOnboardingCompleted = true;
-        Store.Save(settings);
-        BindAll();
-        SelectPage(4);
     }
     MenuFlyout Menu(params (string Text, Func<Task> Action)[] actions)
     {
@@ -442,38 +491,7 @@ internal sealed partial class FluentWindow : Window
             BindAll();
         }
     }
-    async Task UpdateRules(bool show)
-    {
-        if (updating || switchingCategory)
-            return;
-        updating = true;
-        C<Button>("UpdateRulesButton").IsEnabled = false;
-        try
-        {
-            using var client = engine.Running ? engine.Client() : BoundedHttp.Client(TimeSpan.FromSeconds(40));
-            var changed = await RuleRepository.Update(client);
-            await DomainCategories.Update(client);
-            changed |= await DomainRepository.Update(client, settings.BaseDomainCategory);
-            UpdateBase();
-            if (show)
-                await Message(changed ? "Проверенная база загружена. Новые правила применятся при следующем подключении." : "Установлена актуальная версия.", "Общая база");
-        }
-        catch (Exception e) { if (show) await Message("Предыдущая копия базы сохранена.\n" + e.Message, "Обновление не удалось"); else C<TextBlock>("BaseMetadata").Text = RuleRepository.Description() + "\nНе удалось проверить обновления; используется сохранённая копия."; }
-        finally { updating = false; C<Button>("UpdateRulesButton").IsEnabled = true; }
-    }
-    async Task Validate()
-    {
-        if (Profile == null)
-            return;
-        var file = Path.Combine(Store.Run, "validation.json");
-        try
-        {
-            Store.WriteJson(file, await ConfigBuilder.Build(settings, Profile, ConfigBuilder.Detect(), 15876));
-            await CoreCli.Run("check", "-c", file);
-        }
-        finally { File.Delete(file); }
-        await Message("Конфигурация принята sing-box. Доступность сервера проверяется при подключении.", "Проверка пройдена");
-    }
+    Task UpdateRules(bool show) => RunBaseOperation(null, show);
     void UpdateTray() => BuildTray();
     void Restore()
     {

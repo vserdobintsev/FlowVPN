@@ -366,8 +366,10 @@ internal sealed partial class FluentWindow
         bool firstConnection = settings.Sources.Count == 0;
         int added = 0, duplicates = 0;
         VpnSource? selected = null;
+        bool needsOutlineModule = false;
         foreach (var source in sources)
         {
+            needsOutlineModule |= ModuleTransport.RequiredModule(source) != null;
             if (Store.AddSource(settings, source))
             {
                 added++;
@@ -396,6 +398,8 @@ internal sealed partial class FluentWindow
             summary += "\n" + string.Join("\n", importNotes.Take(8));
         string title = added > 0 ? "Подключения добавлены" : duplicates > 0 ? "Подключение уже существует" : "Новых подключений не найдено";
         ConnectionFeedback(title, summary, failures is { Count: > 0 } || importNotes is { Count: > 0 } ? InfoBarSeverity.Warning : added > 0 ? InfoBarSeverity.Success : InfoBarSeverity.Informational);
+        if (needsOutlineModule)
+            await EnsureModuleAvailableAsync(ModuleTransport.OutlineCapability);
         if (firstConnection && added > 0 && settings.Profiles.Count == 0 && !settings.ProfileOnboardingCompleted)
             await ShowProfileSuggestions(onboarding: true);
     }

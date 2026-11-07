@@ -79,7 +79,9 @@ internal sealed class CoreIntegrity : IDisposable
     {
         const uint readAttributes = 0x80, genericRead = 0x80000000;
         const uint openExisting = 3, backupSemantics = 0x02000000, openReparsePoint = 0x00200000;
-        var handle = CreateFile(path, directory ? readAttributes : genericRead, FileShare.Read, IntPtr.Zero,
+        // READ_ATTRIBUTES alone does not participate in Windows share-access exclusion.
+        // LIST_DIRECTORY makes the retained handle reject a concurrent directory writer.
+        var handle = CreateFile(path, directory ? readAttributes | 1u : genericRead, FileShare.Read, IntPtr.Zero,
             openExisting, openReparsePoint | (directory ? backupSemantics : 0), IntPtr.Zero);
         if (handle.IsInvalid)
         {

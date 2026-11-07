@@ -1,4 +1,4 @@
-name: Аудит зависимостей NuGet
+name: Аудит зависимостей NuGet и Go
 on:
   workflow_dispatch:
   schedule:
@@ -15,6 +15,47 @@ env:
   DOTNET_CLI_HOME: ${{ github.workspace }}/work/desktop-build/cli
   NUGET_PACKAGES: ${{ github.workspace }}/work/desktop-build/packages
 jobs:
+  go-audit:
+    name: Go module audit
+    runs-on: windows-2025
+    timeout-minutes: 15
+    env:
+      GOTOOLCHAIN: local
+      GOWORK: 'off'
+      GOPROXY: https://proxy.golang.org
+      GOSUMDB: sum.golang.org
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: modules/outline-transport/go.mod
+          cache: true
+          cache-dependency-path: modules/outline-transport/go.sum
+      - name: Установить закреплённый анализатор Go
+        shell: pwsh
+        env:
+          GOBIN: ${{ runner.temp }}/go-audit-tools
+        run: |
+          go install golang.org/x/vuln/cmd/govulncheck@v1.9.0
+          if ($LASTEXITCODE -ne 0) { throw 'Не удалось получить закреплённый govulncheck; аудит не выполнен.' }
+      - name: Проверить все закреплённые Go-модули
+        shell: pwsh
+        working-directory: modules/outline-transport
+        env:
+          GOBIN: ${{ runner.temp }}/go-audit-tools
+        run: |
+          go mod download
+          if ($LASTEXITCODE -ne 0) { throw 'Не удалось получить закреплённые Go-зависимости.' }
+          go mod verify
+          if ($LASTEXITCODE -ne 0) { throw 'Контрольные суммы Go-зависимостей не совпали.' }
+          # Module mode also rejects known vulnerabilities in unused packages of required modules.
+          & (Join-Path $env:GOBIN 'govulncheck.exe') -scan module -show verbose
+          if ($LASTEXITCODE -ne 0) { throw 'Аудит Go не пройден: уязвимости либо недоступная база/ошибка анализа.' }
+          git diff --exit-code -- go.mod go.sum
+          if ($LASTEXITCODE -ne 0) { throw 'Аудит изменил закреплённые Go-зависимости.' }
+          'В закреплённых Go-модулях не найдено известных уязвимостей в доступной базе Go. Проверены и пакеты вне фактического графа вызовов; runtime-компоненты автоматически не обновляются.' >> $env:GITHUB_STEP_SUMMARY
   audit:
     name: NuGet audit
     runs-on: windows-2025

@@ -36,23 +36,20 @@ internal sealed partial class FluentWindow
         {
             var metadata = JsonNode.Parse(await File.ReadAllTextAsync(RuleRepository.MetaPath))!.AsObject();
             Check(await RuleRepository.ValidCache(metadata), "GeoIP cache is intact");
-            Check(DomainRepository.Current(settings.BaseDomainCategory) != null, "Selected domain category is available");
+            var categories = BaseDomainSelection.From(settings).Categories;
+            Check(categories.Count == 0 || DomainRepository.Current(categories) != null, "Selected domain categories are available or domain policy is explicitly empty");
         }
         int validatedProfiles = 0;
-        string configPath = Path.Combine(Store.Run, "release-validation.json");
-        try
+        foreach (var profile in settings.Profiles)
         {
-            foreach (var profile in settings.Profiles)
-            {
-                Directory.CreateDirectory(Store.ProfileLogs(profile.Id));
-                Store.WriteJson(configPath, await ConfigBuilder.Build(settings, profile, new("Release validation", "127.0.0.1"), 15876));
-                // 'check' parses the actual profile, but does not create a TUN or contact its server.
-                await CoreCli.Run("check", "-c", configPath);
-                validatedProfiles++;
-            }
-            Check(validatedProfiles == settings.Profiles.Count, "All saved profiles pass the bundled core configuration check");
+            Directory.CreateDirectory(Store.ProfileLogs(profile.Id));
+            var snapshot = ProfileValidator.Capture(settings, profile.Id);
+            var configuration = await ProfileValidator.BuildConfiguration(snapshot, new("Release validation", "127.0.0.1"), windowLifetime.Token);
+            // Check the saved profile over stdin; never create a TUN or contact its server.
+            await CoreCli.Check(configuration, windowLifetime.Token);
+            validatedProfiles++;
         }
-        finally { File.Delete(configPath); }
+        Check(validatedProfiles == settings.Profiles.Count, "All saved profiles pass the bundled core configuration check");
         string folder = Path.Combine(Store.Root, "design-preview");
         Directory.CreateDirectory(folder);
         await Task.Delay(300);

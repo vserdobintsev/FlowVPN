@@ -85,7 +85,10 @@ internal static class Entry
             // Older releases generated a plaintext runtime file in user storage.
             // The broker never reads it; remove only this obsolete generated file.
             if (!utility)
+            {
                 File.Delete(Path.Combine(Store.Run, "runtime.json"));
+                File.Delete(Path.Combine(Store.Run, "validation.json"));
+            }
             File.WriteAllText(Path.Combine(Store.Data, "winui-startup-trace.txt"), "Store initialized\n");
             if (utility)
             {
@@ -98,7 +101,7 @@ internal static class Entry
                 {
                     using var client = BoundedHttp.Client(TimeSpan.FromSeconds(45));
                     DomainCategories.Update(client).GetAwaiter().GetResult();
-                    DomainRepository.Update(client, Store.Load().BaseDomainCategory).GetAwaiter().GetResult();
+                    DomainRepository.Update(client, BaseDomainSelection.From(Store.Load()).Categories).GetAwaiter().GetResult();
                     return 0;
                 }
                 if (updateTests)
@@ -108,9 +111,11 @@ internal static class Entry
                     {
                         ReleaseChecks.Run().GetAwaiter().GetResult();
                         CoreControlChecks.Run().GetAwaiter().GetResult();
+                        CoreTrafficChecks.Run().GetAwaiter().GetResult();
+                        DeveloperAvatarChecks.Run().GetAwaiter().GetResult();
                         BrokerChecks.Run().GetAwaiter().GetResult();
                         Directory.CreateDirectory(Path.Combine(Store.Root, "design-preview"));
-                        FeatureChecks.Run(AppPresets.Discover());
+                        FeatureChecks.Run(AppPresets.Discover()).GetAwaiter().GetResult();
                     }
                 }
                 return 0;

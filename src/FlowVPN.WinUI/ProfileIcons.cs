@@ -30,6 +30,7 @@ internal sealed partial class FluentWindow
   ("Сиреневый",206,171,239),("Синий",124,153,246),("Небесный",95,204,242),
   ("Аквамарин",89,220,223),("Песочный",211,185,148),("Жемчужный",224,229,235)};
     readonly List<(string Id, Ellipse Dot)> profileDots = [];
+    readonly Dictionary<string, TextBlock> profileSourceLabels = [];
     string IconKey(VpnProfile p)
     {
         if (p.Icon != "auto" && Icons.Any(x => x.Key == p.Icon))
@@ -76,7 +77,9 @@ internal sealed partial class FluentWindow
         grid.Children.Add(ProfileGlyph(p));
         var text = new StackPanel { Spacing = 4, VerticalAlignment = VerticalAlignment.Center };
         text.Children.Add(Text(p.Name, 13, true));
-        text.Children.Add(new TextBlock { Text = settings.Sources.FirstOrDefault(s => s.Id == p.SourceId)?.Kind ?? "Нет подключения", FontSize = 11, Foreground = Color(158, 178, 198) });
+        var sourceLabel = new TextBlock { Text = settings.Sources.FirstOrDefault(s => s.Id == p.SourceId)?.Kind ?? "Нет подключения", FontSize = 11, Foreground = Color(158, 178, 198) };
+        text.Children.Add(sourceLabel);
+        profileSourceLabels[p.Id] = sourceLabel;
         Grid.SetColumn(text, 1);
         grid.Children.Add(text);
         return grid;
@@ -88,98 +91,5 @@ internal sealed partial class FluentWindow
             item.Dot.Visibility = engine.Running && engine.ActiveProfileId == item.Id ? Visibility.Visible : Visibility.Collapsed;
             item.Dot.Fill = engine.Healthy ? Color(0, 145, 125) : Color(210, 135, 35);
         }
-    }
-    Task EditProfileIcon() => Profile == null ? Task.CompletedTask : EditProfileIdentity(Profile);
-    async Task EditProfileIdentity(VpnProfile profile)
-    {
-        if (dialogOpen)
-            return;
-        var example = new VpnProfile { Name = profile.Name, Apps = profile.Apps, SourceId = profile.SourceId, Icon = profile.Icon, IconColor = profile.IconColor };
-        var preview = (Border)Microsoft.UI.Xaml.Markup.XamlReader.Load("""
-            <Border xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
-                Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
-                BorderBrush="{ThemeResource ControlStrokeColorDefaultBrush}" BorderThickness="1"
-                CornerRadius="10" Padding="14,10" />
-            """);
-        var colorLabel = new TextBlock { FontSize = 13 };
-        void RefreshExample()
-        {
-            var row = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 12 };
-            row.Children.Add(ProfileGlyph(example, track: false, adaptToTheme: true));
-            row.Children.Add(new TextBlock { Text = example.Name, FontSize = 14, VerticalAlignment = VerticalAlignment.Center, MaxWidth = 345, TextTrimming = TextTrimming.CharacterEllipsis });
-            preview.Child = row;
-            colorLabel.Text = "Цвет · " + (example.IconColor < 0 ? "Автоматически" : Palette[ProfileColor(example)].Name);
-        }
-        var search = new TextBox { PlaceholderText = $"Найти значок · {Icons.Length} вариантов" };
-        Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(search, "Поиск значка профиля");
-        var icons = new GridView { SelectionMode = ListViewSelectionMode.Single, Height = 210, HorizontalContentAlignment = HorizontalAlignment.Center };
-        Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(icons, "Значок профиля");
-        bool filling = false;
-        void FillIcons()
-        {
-            filling = true;
-            icons.Items.Clear();
-            foreach (var spec in Icons.Where(s => s.Name.Contains(search.Text, StringComparison.CurrentCultureIgnoreCase)))
-            {
-                var panel = new StackPanel { Width = 86, Spacing = 7, Padding = new Thickness(4, 10, 4, 8), HorizontalAlignment = HorizontalAlignment.Center };
-                panel.Children.Add(new FontIcon { Glyph = spec.Glyph, FontSize = 22 });
-                panel.Children.Add(new TextBlock { Text = spec.Name, FontSize = 11, TextAlignment = TextAlignment.Center, TextWrapping = TextWrapping.Wrap });
-                var item = new GridViewItem { Content = panel, Tag = spec.Key, MinWidth = 0, Padding = new Thickness(2) };
-                Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(item, spec.Name);
-                icons.Items.Add(item);
-                if (example.Icon == spec.Key)
-                    icons.SelectedItem = item;
-            }
-            filling = false;
-        }
-        icons.SelectionChanged += (_, _) => { if (!filling && icons.SelectedItem is GridViewItem item) { example.Icon = (string)item.Tag; RefreshExample(); } };
-        search.TextChanged += (_, _) => FillIcons();
-        FillIcons();
-        var colors = new GridView { SelectionMode = ListViewSelectionMode.Single, MaxHeight = 140 };
-        Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(colors, "Цвет профиля");
-        for (int i = -1; i < Palette.Length; i++)
-        {
-            UIElement swatch = i < 0 ? new FontIcon { Glyph = "\uE713", FontSize = 17 } : new Ellipse { Width = 22, Height = 22, Fill = Color(Palette[i].R, Palette[i].G, Palette[i].B), Stroke = new SolidColorBrush(Windows.UI.Color.FromArgb(70, 70, 80, 90)), StrokeThickness = 1 };
-            var item = new GridViewItem { Content = swatch, Tag = i, Width = 40, Height = 36, MinWidth = 0, MinHeight = 0, Padding = new Thickness(4), HorizontalContentAlignment = HorizontalAlignment.Center, VerticalContentAlignment = VerticalAlignment.Center };
-            string name = i < 0 ? "Автоматически" : Palette[i].Name;
-            Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(item, name);
-            ToolTipService.SetToolTip(item, name);
-            colors.Items.Add(item);
-            if (i == example.IconColor)
-                colors.SelectedItem = item;
-        }
-        if (colors.SelectedIndex < 0)
-            colors.SelectedIndex = 0;
-        colors.SelectionChanged += (_, _) => { if (colors.SelectedItem is GridViewItem item) { example.IconColor = (int)item.Tag; RefreshExample(); } };
-        var nameInput = new TextBox { Header = "Название профиля", Text = profile.Name, MaxLength = 80 };
-        nameInput.TextChanged += (_, _) => { example.Name = nameInput.Text.Trim(); RefreshExample(); };
-        RefreshExample();
-        var content = new StackPanel { Width = 440, Spacing = 12 };
-        content.Children.Add(nameInput);
-        content.Children.Add(new TextBlock { Text = "Предпросмотр", FontSize = 12, Opacity = .7 });
-        content.Children.Add(preview);
-        content.Children.Add(search);
-        content.Children.Add(icons);
-        content.Children.Add(colorLabel);
-        content.Children.Add(colors);
-        var scroll = new ScrollViewer { Content = content, MaxHeight = Math.Clamp(root.ActualHeight - 220, 220, 600), VerticalScrollBarVisibility = ScrollBarVisibility.Auto, HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled };
-        var dialog = new ContentDialog { XamlRoot = root.XamlRoot, RequestedTheme = root.ActualTheme, Title = "Название и оформление", Content = scroll, PrimaryButtonText = "Сохранить", CloseButtonText = "Отмена", DefaultButton = ContentDialogButton.Primary };
-        nameInput.TextChanged += (_, _) => dialog.IsPrimaryButtonEnabled = nameInput.Text.Trim().Length > 0;
-        dialog.PrimaryButtonClick += (_, args) => args.Cancel = nameInput.Text.Trim().Length == 0;
-        ReviewDialog(dialog);
-        dialogOpen = true;
-        try
-        {
-            if (await dialog.ShowAsync() == ContentDialogResult.Primary)
-            {
-                profile.Name = nameInput.Text.Trim();
-                profile.Icon = example.Icon;
-                profile.IconColor = example.IconColor;
-                Store.Save(settings);
-                BindAll();
-                SelectPage(page);
-            }
-        }
-        finally { dialogOpen = false; }
     }
 }

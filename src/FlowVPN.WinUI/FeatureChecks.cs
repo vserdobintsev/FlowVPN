@@ -4,7 +4,7 @@ namespace FlowVPN;
 
 internal static class FeatureChecks
 {
-    public static void Run(List<DetectedPreset> presets)
+    public static async Task Run(List<DetectedPreset> presets)
     {
         var passed = new List<string>();
         void Check(bool condition, string name)
@@ -14,8 +14,14 @@ internal static class FeatureChecks
             passed.Add(name);
         }
         SecurityChecks.Run(Check);
+        CoreDirectoryChecks.Run(Check);
         ImportChecks.Run(Check);
         ManualConnectionChecks.Run(Check);
+        ModuleTransportChecks.Run(Check);
+        await ProfileValidationChecks.Run(Check);
+        TrafficHistoryChecks.Run(Check);
+        await TransferProgressChecks.Run(Check);
+        await ModuleChecks.Run(Check);
         LocalPathChecks.Run(Check);
         Check(TaskbarState.From(false, false, false, true) is { Running: false, Enabled: true } && TaskbarState.From(false, true, false, false) is { Running: true, Enabled: true }, "One taskbar command toggles between connect and disconnect");
         Check(!TaskbarState.From(true, false, false, true).Enabled && !TaskbarState.From(false, false, true, true).Enabled && !TaskbarState.From(false, false, false, false).Enabled, "Taskbar command is disabled in preview, during transitions and without a source");
@@ -131,6 +137,9 @@ internal static class FeatureChecks
         File.WriteAllText(Path.Combine(Store.Root, "design-preview", "preset-discovery.json"), JsonSerializer.Serialize(presets.Select(p => new { p.Definition.Name, p.Available, Components = p.Components.Where(c => c.Available).Select(c => new { c.Rule.Name, c.Rule.ComponentRole, c.Suggested, c.Rule.Path }) }), Store.JsonOptions));
         AuditChecks.Run(Check);
         DomainRuleChecks.Run(Check);
+        await DomainRepositoryChecks.Run(Check);
+        await BaseRulePreparationChecks.Run(Check);
+        await ResumableDownloadChecks.Run(Check);
         ProcessCatalogChecks.Run(Check);
         File.WriteAllText(Path.Combine(Store.Root, "design-preview", "feature-checks.json"), JsonSerializer.Serialize(new
         {

@@ -36,11 +36,13 @@ internal sealed partial class FluentWindow
             string? selected = ((list.SelectedItem as ListViewItem)?.Tag as CoreConnection)?.Id;
             list.Items.Clear();
             status.Text = snapshot == null ? engine.ControlError.Length > 0 ? engine.ControlError : "Ожидаем ответ движка…"
-                : $"Соединений: {snapshot.Connections.Count} · ↑ {Bytes(snapshot.Uploaded)} · ↓ {Bytes(snapshot.Downloaded)}\nСтатистика всего трафика, обработанного sing-box в этом сеансе.";
-            foreach (var connection in snapshot?.Connections.Where(c => (c.Host + " " + c.ProcessPath + " " + c.Route).Contains(search.Text, StringComparison.OrdinalIgnoreCase)).Take(300) ?? [])
+                : $"Соединений: {snapshot.TotalConnectionCount ?? snapshot.Connections.Count} · ↑ {Bytes(snapshot.Uploaded)} · ↓ {Bytes(snapshot.Downloaded)}\nСтатистика всего трафика, обработанного sing-box в этом сеансе." +
+                    (snapshot.TotalConnectionCount > snapshot.Connections.Count ? $"\nПоказаны {snapshot.Connections.Count} из {snapshot.TotalConnectionCount} активных соединений." : "") +
+                    (!Entry.VisualTest && engine.ControlError.Length > 0 ? "\n" + engine.ControlError : "");
+            foreach (var connection in snapshot?.Connections.Where(c => (c.Host + " " + c.DestinationIp + " " + c.ProcessPath + " " + c.Route).Contains(search.Text, StringComparison.OrdinalIgnoreCase)).Take(300) ?? [])
             {
-                var item = Card(connection.Host.Length > 0 ? connection.Host : "Соединение по IP", Path.GetFileName(connection.ProcessPath) + " · " + connection.Route + $" · ↓ {Bytes(connection.Downloaded)}", "\uE774", connection);
-                ToolTipService.SetToolTip(item, connection.ProcessPath + "\n" + connection.Route);
+                var item = Card(TrafficConnectionGroups.Address(connection), Path.GetFileName(connection.ProcessPath) + " · " + connection.Route + $" · ↓ {Bytes(connection.Downloaded)}", "\uE774", connection);
+                ToolTipService.SetToolTip(item, connection.ProcessPath + "\n" + connection.DestinationIp + "\n" + connection.Route);
                 list.Items.Add(item);
                 if (connection.Id == selected)
                     list.SelectedItem = item;
@@ -70,7 +72,7 @@ internal sealed partial class FluentWindow
         timer.Start();
         try
         {
-            await Dialog("Соединения · " + (engine.ActiveProfile ?? "предпросмотр"), panel, "Готово", false);
+            await Dialog("Управление соединениями · " + (engine.ActiveProfile ?? "предпросмотр"), panel, "Готово", false);
         }
         finally { closed = true; timer.Stop(); lifetime.Cancel(); }
     }

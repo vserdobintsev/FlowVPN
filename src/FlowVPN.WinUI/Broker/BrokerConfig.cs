@@ -17,6 +17,22 @@ internal static class BrokerConfig
         if (plan.Mode is not ("include" or "exclude" or "all") || proxyPort is < 1 or > 65535)
             throw Invalid();
         var target = Source(plan.Kind, plan.ConnectionJson);
+        if (plan.LocalTransport is { } transport)
+        {
+            if (plan.Kind != "Outline" || transport.ModuleId != ModuleTransport.OutlineModuleId || transport.ProtocolVersion != 1 ||
+                transport.Port is < 1024 or > 65535 || !BrokerWire.IsNonce(transport.Username) || !BrokerWire.IsNonce(transport.Password) ||
+                transport.InterfaceName != uplink.Name)
+                throw Invalid();
+            string loopback = System.Net.NetworkInformation.NetworkInterface.GetAllNetworkInterfaces()
+                .FirstOrDefault(n => n.NetworkInterfaceType == System.Net.NetworkInformation.NetworkInterfaceType.Loopback)?.Name
+                ?? throw new InvalidOperationException("Локальный сетевой интерфейс Windows недоступен.");
+            target = new JsonObject
+            {
+                ["type"] = "socks", ["tag"] = "vpn", ["server"] = "127.0.0.1", ["server_port"] = transport.Port,
+                ["version"] = "5", ["username"] = transport.Username, ["password"] = transport.Password,
+                ["bind_interface"] = loopback, ["inet4_bind_address"] = "127.0.0.1"
+            };
+        }
         var patterns = Strings(plan.ProcessPatterns, 4096, 4096);
         var domains = Strings(plan.Domains, 100_000, 253).Select(DomainCoverage.Normalize).Distinct(StringComparer.Ordinal).ToArray();
         var cidrs = Strings(plan.IpCidrs, MaxRules, 64);
@@ -25,28 +41,30 @@ internal static class BrokerConfig
                 throw Invalid();
         if (!plan.BaseEnabled && (cidrs.Length != 0 || plan.BaseDomains != null))
             throw Invalid();
-        if (plan.BaseEnabled && (cidrs.Length == 0 || plan.BaseDomains == null))
+        if (plan.BaseEnabled && cidrs.Length == 0)
             throw Invalid();
 
         var sets = new JsonArray();
         if (plan.BaseEnabled)
         {
             sets.Add(new JsonObject { ["type"] = "inline", ["tag"] = "ru-blocked", ["rules"] = new JsonArray(new JsonObject { ["ip_cidr"] = A(cidrs) }) });
-            var source = plan.BaseDomains!;
-            var domainRules = new JsonObject();
-            long count = (long)(source.Domain?.Length ?? 0) + (source.Suffix?.Length ?? 0) + (source.Keyword?.Length ?? 0) + (source.Regex?.Length ?? 0);
-            if (count is 0 or > MaxRules)
-                throw Invalid();
-            Add("domain", source.Domain, 253, true);
-            Add("domain_suffix", source.Suffix, 253, true);
-            Add("domain_keyword", source.Keyword, 1024, false);
-            Add("domain_regex", source.Regex, 4096, false);
-            sets.Add(new JsonObject { ["type"] = "inline", ["tag"] = "ru-domains", ["rules"] = new JsonArray(domainRules) });
-            void Add(string key, string[]? values, int length, bool normalize)
+            if (plan.BaseDomains is { } source)
             {
-                var clean = Strings(values, MaxRules, length);
-                if (clean.Length > 0)
-                    domainRules[key] = A(normalize ? clean.Select(DomainCoverage.Normalize) : clean);
+                var domainRules = new JsonObject();
+                long count = (long)(source.Domain?.Length ?? 0) + (source.Suffix?.Length ?? 0) + (source.Keyword?.Length ?? 0) + (source.Regex?.Length ?? 0);
+                if (count is 0 or > MaxRules)
+                    throw Invalid();
+                Add("domain", source.Domain, 253, true);
+                Add("domain_suffix", source.Suffix, 253, true);
+                Add("domain_keyword", source.Keyword, 1024, false);
+                Add("domain_regex", source.Regex, 4096, false);
+                sets.Add(new JsonObject { ["type"] = "inline", ["tag"] = "ru-domains", ["rules"] = new JsonArray(domainRules) });
+                void Add(string key, string[]? values, int length, bool normalize)
+                {
+                    var clean = Strings(values, MaxRules, length);
+                    if (clean.Length > 0)
+                        domainRules[key] = A(normalize ? clean.Select(DomainCoverage.Normalize) : clean);
+                }
             }
         }
         var dnsRules = new JsonArray();
@@ -61,7 +79,7 @@ internal static class BrokerConfig
             new JsonObject { ["protocol"] = "dns", ["action"] = "hijack-dns" }
         };
         if (plan.BaseEnabled)
-            rules.Add(new JsonObject { ["rule_set"] = A(["ru-blocked", "ru-domains"]), ["action"] = "route", ["outbound"] = "vpn" });
+            rules.Add(new JsonObject { ["rule_set"] = A(plan.BaseDomains == null ? ["ru-blocked"] : ["ru-blocked", "ru-domains"]), ["action"] = "route", ["outbound"] = "vpn" });
         rules.Add(new JsonObject { ["ip_is_private"] = true, ["action"] = "route", ["outbound"] = "direct" });
         if (domains.Length > 0)
             rules.Add(new JsonObject { ["domain_suffix"] = A(domains), ["action"] = "route", ["outbound"] = "vpn" });

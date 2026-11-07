@@ -13,15 +13,21 @@ public sealed record GeoSiteData(IReadOnlyList<string> Categories, IReadOnlyList
 public static class GeoSiteReader
 {
     static readonly UTF8Encoding Utf8 = new(false, true);
-    public static GeoSiteData Read(ReadOnlySpan<byte> bytes, string? selected = null)
+    public static GeoSiteData Read(ReadOnlySpan<byte> bytes, string? selected = null, CancellationToken token = default) =>
+        ReadMany(bytes, selected == null ? [] : [selected], token);
+
+    public static GeoSiteData ReadMany(ReadOnlySpan<byte> bytes, IReadOnlyCollection<string> selected, CancellationToken token = default)
     {
         if (bytes.Length > 128 * 1024 * 1024)
             throw new InvalidDataException("Каталог GeoSite больше ожидаемого размера.");
         var root = new WireReader(bytes);
         var categories = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var wanted = BaseDomainSelection.CanonicalCategories(selected).ToHashSet(StringComparer.Ordinal);
+        var uniqueTerms = new HashSet<DomainTerm>();
         var terms = new List<DomainTerm>();
         while (!root.End)
         {
+            token.ThrowIfCancellationRequested();
             uint tag = root.Tag();
             if (tag != 10)
             {
@@ -33,6 +39,7 @@ public static class GeoSiteReader
             string id = "";
             while (!entry.End)
             {
+                token.ThrowIfCancellationRequested();
                 tag = entry.Tag();
                 if (tag == 10)
                 {
@@ -48,11 +55,12 @@ public static class GeoSiteReader
                 throw new InvalidDataException("Повторяющееся имя категории GeoSite.");
             if (categories.Count > 20000)
                 throw new InvalidDataException("Слишком много категорий GeoSite.");
-            if (id != selected)
+            if (!wanted.Contains(id))
                 continue;
             entry = new WireReader(entryBytes);
             while (!entry.End)
             {
+                token.ThrowIfCancellationRequested();
                 tag = entry.Tag();
                 if (tag != 18)
                 {
@@ -74,12 +82,14 @@ public static class GeoSiteReader
                 }
                 if (type is < 0 or > 3 || value.Length is 0 or > 16384)
                     throw new InvalidDataException("Неизвестный формат доменного правила GeoSite.");
-                terms.Add(new((DomainTermKind)type, value));
+                if (type == (int)DomainTermKind.Exact || type == (int)DomainTermKind.Suffix) value = DomainCoverage.Normalize(value);
+                var term = new DomainTerm((DomainTermKind)type, value);
+                if (uniqueTerms.Add(term)) terms.Add(term);
                 if (terms.Count > 2000000)
                     throw new InvalidDataException("Слишком много записей в категории GeoSite.");
             }
         }
-        if (categories.Count == 0 || selected != null && !categories.Contains(selected))
+        if (categories.Count == 0 || !wanted.IsSubsetOf(categories))
             throw new InvalidDataException("Выбранной категории нет в каталоге GeoSite.");
         return new(categories.OrderBy(c => c, StringComparer.Ordinal).ToArray(), terms);
     }

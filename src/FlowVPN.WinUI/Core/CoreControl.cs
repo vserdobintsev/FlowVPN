@@ -2,16 +2,18 @@ using System.Net;
 using System.Net.Http.Headers;
 using System.Net.Sockets;
 using System.Security.Cryptography;
+using System.Text.Json;
 using System.Text.Json.Nodes;
 
 namespace FlowVPN;
 
-public sealed record CoreConnection(string Id, string Host, string ProcessPath, string Route, long Uploaded, long Downloaded);
-public sealed record CoreSnapshot(string Version, long Uploaded, long Downloaded, IReadOnlyList<CoreConnection> Connections, DateTimeOffset CapturedAt);
+public sealed record CoreConnection(string Id, string Host, string ProcessPath, string Route, long Uploaded, long Downloaded, string DestinationIp = "");
+public sealed record CoreSnapshot(string Version, long Uploaded, long Downloaded, IReadOnlyList<CoreConnection> Connections, DateTimeOffset CapturedAt, int? TotalConnectionCount = null);
 
 // The management API is local, authenticated and separate from the tunnel's traffic probe.
 public sealed class CoreControl : IDisposable
 {
+    public const int MaximumConnections = 256;
     readonly HttpClient client;
     public int Port
     {
@@ -57,20 +59,56 @@ public sealed class CoreControl : IDisposable
     }
     public static CoreSnapshot ParseSnapshot(string json, string version)
     {
-        var data = JsonNode.Parse(json) ?? throw new InvalidDataException("Пустой ответ API.");
-        long uploaded = data["uploadTotal"]?.GetValue<long>() ?? 0, downloaded = data["downloadTotal"]?.GetValue<long>() ?? 0;
-        var connections = new List<CoreConnection>();
-        foreach (var item in data["connections"]?.AsArray() ?? [])
+        using var document = JsonDocument.Parse(json, new JsonDocumentOptions { MaxDepth = 32 });
+        var data = document.RootElement;
+        if (data.ValueKind != JsonValueKind.Object) throw new InvalidDataException("Некорректный ответ API.");
+        long uploaded = Counter(data, "uploadTotal", required: true), downloaded = Counter(data, "downloadTotal", required: true);
+        var connections = new List<CoreConnection>(MaximumConnections);
+        int total = 0;
+        if (data.TryGetProperty("connections", out var items) && items.ValueKind != JsonValueKind.Null)
         {
-            if (item == null)
-                continue;
-            string id = item["id"]?.GetValue<string>() ?? "";
-            if (!Guid.TryParse(id, out _))
-                continue;
-            connections.Add(new(id, item["metadata"]?["host"]?.GetValue<string>() ?? "", item["metadata"]?["processPath"]?.GetValue<string>() ?? "",
-                string.Join(" → ", item["chains"]?.AsArray().Select(n => n?.GetValue<string>()) ?? []), item["upload"]?.GetValue<long>() ?? 0, item["download"]?.GetValue<long>() ?? 0));
+            if (items.ValueKind != JsonValueKind.Array) throw new InvalidDataException("Некорректный список соединений API.");
+            foreach (var item in items.EnumerateArray())
+            {
+                if (item.ValueKind != JsonValueKind.Object || !item.TryGetProperty("id", out var value) ||
+                    value.ValueKind != JsonValueKind.String || !value.TryGetGuid(out var id)) continue;
+                total++;
+                if (connections.Count == MaximumConnections) continue;
+                item.TryGetProperty("metadata", out var metadata);
+                string route = "";
+                if (item.TryGetProperty("chains", out var chains) && chains.ValueKind == JsonValueKind.Array)
+                {
+                    foreach (var chain in chains.EnumerateArray())
+                    {
+                        if (chain.ValueKind != JsonValueKind.String) continue;
+                        route += (route.Length == 0 ? "" : " → ") + Trim(chain.GetString() ?? "", 256);
+                        if (route.Length >= 256) { route = Trim(route, 256); break; }
+                    }
+                }
+                connections.Add(new(id.ToString("D"), Text(metadata, "host", 253), Text(metadata, "processPath", 512), route,
+                    Counter(item, "upload"), Counter(item, "download"), Text(metadata, "destinationIP", 64)));
+            }
         }
-        return new(version, uploaded, downloaded, connections, DateTimeOffset.Now);
+        return new(version, uploaded, downloaded, connections, DateTimeOffset.Now, total);
+
+        static string Trim(string value, int maximum) => value.Length <= maximum ? value : value[..maximum];
+        static string Text(JsonElement item, string name, int maximum) => item.ValueKind == JsonValueKind.Object && item.TryGetProperty(name, out var value) && value.ValueKind == JsonValueKind.String
+            ? Trim(value.GetString() ?? "", maximum) : "";
+        static long Counter(JsonElement item, string name, bool required = false)
+        {
+            if (!item.TryGetProperty(name, out var value))
+                return required ? throw new InvalidDataException("Отсутствует счётчик API.") : 0;
+            return value.ValueKind == JsonValueKind.Number && value.TryGetInt64(out long number) && number >= 0
+                ? number : throw new InvalidDataException("Некорректный счётчик API.");
+        }
+    }
+    internal async Task ReadTraffic(Action<CoreTrafficDelta> receive, CancellationToken token)
+    {
+        using var request = new HttpRequestMessage(HttpMethod.Get, "traffic");
+        using var response = await client.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, token).ConfigureAwait(false);
+        response.EnsureSuccessStatusCode();
+        await using var stream = await response.Content.ReadAsStreamAsync(token).ConfigureAwait(false);
+        await CoreTrafficMonitor.ReadFrames(stream, receive, token).ConfigureAwait(false);
     }
     public async Task CloseConnection(string id, CancellationToken token)
     {
