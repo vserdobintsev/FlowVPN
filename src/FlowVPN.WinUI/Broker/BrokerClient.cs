@@ -98,6 +98,8 @@ internal sealed class BrokerClient : IDisposable
     }
 
     public Task<BrokerState> State(CancellationToken token) => Exchange(new() { Command = "status" }, token);
+    public async Task<CoreTrafficSnapshot> Traffic(CancellationToken token) =>
+        (await ExchangeReply(new() { Command = "traffic" }, token).ConfigureAwait(false)).Traffic!;
     public Task<BrokerState> CloseConnection(string id, CancellationToken token)
     {
         if (!Guid.TryParseExact(id, "D", out _))
@@ -140,7 +142,10 @@ internal sealed class BrokerClient : IDisposable
         }
     }
 
-    async Task<BrokerState> Exchange(BrokerRequest request, CancellationToken token)
+    async Task<BrokerState> Exchange(BrokerRequest request, CancellationToken token) =>
+        (await ExchangeReply(request, token).ConfigureAwait(false)).State!;
+
+    async Task<BrokerReply> ExchangeReply(BrokerRequest request, CancellationToken token)
     {
         using var deadline = CancellationTokenSource.CreateLinkedTokenSource(token, lifetime.Token);
         deadline.CancelAfter(TimeSpan.FromSeconds(30));
@@ -153,7 +158,9 @@ internal sealed class BrokerClient : IDisposable
             var reply = await BrokerWire.ReadAsync<BrokerReply>(pipe, deadline.Token, BrokerWire.MaxReplyBytes).ConfigureAwait(false);
             if (!reply.Success)
                 throw new BrokerRejectedException(reply.Error ?? "Процесс VPN отклонил запрос.", reply.State);
-            return reply.State ?? throw new InvalidDataException("Процесс VPN не сообщил состояние.");
+            if (request.Command == "traffic" ? reply.Traffic is null : reply.State is null)
+                throw new InvalidDataException("Процесс VPN не сообщил состояние.");
+            return reply;
         }
         catch (Exception error) when (error is IOException or InvalidDataException or ObjectDisposedException or OperationCanceledException or JsonException)
         {

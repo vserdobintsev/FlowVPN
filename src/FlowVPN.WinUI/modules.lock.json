@@ -1,0 +1,18 @@
+{
+  "SchemaVersion": 1,
+  "Modules": [
+    {
+      "Id": "outline-transport",
+      "Version": "1.0.0",
+      "Name": "Совместимость Outline",
+      "Description": "Поддержка ключей Outline с маскировкой начала соединения. Требуется только для подключений с префиксом.",
+      "ExecutableName": "flowvpn-outline-transport.exe",
+      "DownloadUrl": "https://github.com/vserdobintsev/FlowVPN/releases/download/outline-transport-v1.0.0/flowvpn-outline-transport.exe",
+      "SizeBytes": 3952640,
+      "Sha256": "08df3ea4a8a0618db930609b1126f7827adcc3326c2557a5e8675948c1b41ad7",
+      "Capabilities": ["outline.ss-prefix.tcp.v1"],
+      "ProtocolVersion": 1,
+      "Architecture": "x64"
+    }
+  ]
+}

@@ -6,7 +6,7 @@ namespace FlowVPN;
 internal sealed partial class FluentWindow
 {
     readonly record struct PageInfo(int Id, string Element, bool General = false);
-    static readonly PageInfo[] Pages = [new(0, "AppsPage"), new(1, "BasePage", true), new(2, "SourcesPage", true), new(3, "LogsPage"), new(4, "ProfileSettingsPage"), new(5, "UpdatesPage", true), new(6, "StartupPage", true), new(7, "AboutPage", true), new(8, "ProfileSetsPage", true)];
+    static readonly PageInfo[] Pages = [new(0, "AppsPage"), new(1, "BasePage", true), new(2, "SourcesPage", true), new(3, "LogsPage"), new(4, "ProfileSettingsPage"), new(5, "UpdatesPage", true), new(6, "StartupPage", true), new(7, "AboutPage", true), new(8, "ProfileSetsPage", true), new(9, "ModulesPage", true), new(10, "TrafficPage")];
     static PageInfo Page(int id) => Pages.First(p => p.Id == id);
     bool navigating;
     void SelectPage(int index)
@@ -29,8 +29,8 @@ internal sealed partial class FluentWindow
             C<FrameworkElement>("SettingsPage").Visibility = general ? Visibility.Visible : Visibility.Collapsed;
             C<FrameworkElement>("BaseBadge").Visibility = general ? Visibility.Collapsed : Visibility.Visible;
             C<FrameworkElement>("SettingsNavigation").Visibility = catalog ? Visibility.Collapsed : Visibility.Visible;
-            C<Button>("SettingsButton").Background = Color(general && !catalog ? (byte)0 : (byte)37, general && !catalog ? (byte)105 : (byte)57, general && !catalog ? (byte)98 : (byte)77);
-            C<Button>("ProfileSuggestionsButton").Background = catalog ? Color(0, 105, 98) : new Microsoft.UI.Xaml.Media.SolidColorBrush(Microsoft.UI.Colors.Transparent);
+            SetSidebarNavigationState("SettingsButton", "Настройки приложения", general && !catalog);
+            SetSidebarNavigationState("ProfileSuggestionsButton", "Готовые наборы", catalog);
             bool previous = binding;
             binding = true;
             C<ListView>("ProfileList").SelectedItem = general ? null : C<ListView>("ProfileList").Items.OfType<ListViewItem>()
@@ -52,13 +52,25 @@ internal sealed partial class FluentWindow
                 UpdateLog();
             if (catalog)
                 ShowProfileSetsPage();
+            if (index == 9)
+                ShowModulesPage();
+            if (index == 10)
+                UpdateTrafficPage();
             if (previousPage != index)
             {
+                C<ScrollViewer>("MainScroll").ChangeView(null, 0, null, true);
                 var target = C<FrameworkElement>(empty ? "EmptyProfileState" : destination.Element);
                 motion.Enter(target);
             }
         }
         finally { navigating = false; }
+    }
+    void SetSidebarNavigationState(string name, string label, bool selected)
+    {
+        var button = C<Button>(name);
+        button.Background = selected ? Color(0, 105, 98) : new Microsoft.UI.Xaml.Media.SolidColorBrush(Microsoft.UI.Colors.Transparent);
+        Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(button, label);
+        Microsoft.UI.Xaml.Automation.AutomationProperties.SetItemStatus(button, selected ? "Выбранный раздел" : "");
     }
     string ProfileLogFolder()
     {

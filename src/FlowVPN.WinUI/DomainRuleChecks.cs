@@ -6,6 +6,7 @@ internal static class DomainRuleChecks
 {
     public static void Run(Action<bool, string> check)
     {
+        BaseDomainSelectionChecks.Run(check);
         var coverage = new DomainCoverage(["example.com", "пример.рф"]);
         check(coverage.Match("www.EXAMPLE.com.") == "example.com" && coverage.Match("notexample.com") == null, "Base lookup is case-insensitive and respects domain label boundaries");
         check(coverage.Match("sub.xn--e1afmkfd.xn--p1ai") != null, "Base matching supports IDN and subdomains");

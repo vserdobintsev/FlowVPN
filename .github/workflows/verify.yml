@@ -16,6 +16,62 @@ env:
   NUGET_PACKAGES: ${{ github.workspace }}/work/desktop-build/packages
   RestoreLockedMode: 'true'
 jobs:
+  module:
+    name: Outline transport
+    runs-on: windows-2025
+    timeout-minutes: 20
+    env:
+      GOTOOLCHAIN: local
+      GOWORK: 'off'
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: modules/outline-transport/go.mod
+          cache: true
+          cache-dependency-path: modules/outline-transport/go.sum
+      - name: Проверить формат и закреплённые зависимости Go
+        shell: pwsh
+        working-directory: modules/outline-transport
+        run: |
+          $unformatted = & gofmt -l .
+          if ($LASTEXITCODE -ne 0 -or $unformatted) { throw "Go formatting check failed: $unformatted" }
+          go mod download
+          if ($LASTEXITCODE -ne 0) { throw 'Go dependency download failed.' }
+          go mod verify
+          if ($LASTEXITCODE -ne 0) { throw 'Go module integrity check failed.' }
+          git diff --exit-code -- go.mod go.sum
+          if ($LASTEXITCODE -ne 0) { throw 'Pinned Go dependency files changed.' }
+      - name: Подготовить движок для локальной проверки совместимости
+        shell: pwsh
+        run: ./src/FlowVPN.WinUI/Distribution/Get-PinnedCore.ps1 -Destination ./outputs/FlowVPN/core
+      - name: Проверить модуль и воспроизводимость сборки без TUN
+        shell: pwsh
+        run: |
+          $core = (Resolve-Path ./outputs/FlowVPN/core/sing-box.exe).Path
+          ./modules/outline-transport/Build.ps1 -OutputDirectory ./work/module-build-first -SingBoxPath $core
+          ./modules/outline-transport/Build.ps1 -OutputDirectory ./work/module-build-second -SingBoxPath $core
+          $first = Get-Content ./work/module-build-first/artifact.json -Raw | ConvertFrom-Json
+          $second = Get-Content ./work/module-build-second/artifact.json -Raw | ConvertFrom-Json
+          if ($first.Sha256 -cne $second.Sha256 -or $first.SizeBytes -ne $second.SizeBytes) {
+              throw 'Module builds are not reproducible.'
+          }
+          $catalog = Get-Content ./src/FlowVPN.WinUI/modules.lock.json -Raw | ConvertFrom-Json
+          $entry = @($catalog.Modules | Where-Object Id -eq $first.Id)
+          if ($entry.Count -ne 1 -or $entry[0].Version -cne $first.Version -or
+              $entry[0].Sha256 -ine $first.Sha256 -or $entry[0].SizeBytes -ne $first.SizeBytes) {
+              throw 'The embedded module pin does not match the reproducible source build.'
+          }
+          git diff --exit-code -- modules/outline-transport/go.mod modules/outline-transport/go.sum
+          if ($LASTEXITCODE -ne 0) { throw 'Tests or build changed pinned Go dependencies.' }
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: Outline-transport-verification
+          path: work/module-build-first/
+          if-no-files-found: error
+          retention-days: 3
   verify:
     name: Build (${{ matrix.mode }})
     runs-on: windows-2025

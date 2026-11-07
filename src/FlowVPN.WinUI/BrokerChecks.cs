@@ -55,7 +55,30 @@ internal static class BrokerChecks
                         $"Broker {kind}/{mode}/base={enabled} has no privileged log or rule file paths");
                     await CheckStdin(config);
                     Check(true, $"Broker {kind}/{mode}/base={enabled} passes pinned sing-box check over stdin without TUN");
+                      if (kind == "Outline")
+                      {
+                          plan.LocalTransport = new()
+                          {
+                              ModuleId = ModuleTransport.OutlineModuleId, ProtocolVersion = 1, Port = 23456,
+                              Username = new string('A', 64), Password = new string('B', 64), InterfaceName = "Fixture adapter"
+                          };
+                          var moduleConfig = BrokerConfig.Build(plan, new("Fixture adapter", "127.0.0.1"), 15876, api, new());
+                          Check(JsonNode.DeepEquals(config["route"], moduleConfig["route"]) && JsonNode.DeepEquals(config["dns"], moduleConfig["dns"]),
+                              $"Module transport preserves all routing and DNS rules in {mode}/base={enabled}");
+                          await CheckStdin(moduleConfig);
+                          Check(true, $"Module transport {mode}/base={enabled} passes pinned engine validation");
+                      }
                 }
+        using (var api = new CoreControl(15876))
+        {
+            var ipOnly = BrokerConfig.Build(new BrokerPlan { Kind = "Outline", ConnectionJson = outline.ConnectionJson, BaseEnabled = true, IpCidrs = ["192.0.2.0/24"] },
+                new("Fixture adapter", "127.0.0.1"), 15876, api, new());
+            Check(ipOnly["route"]!["rule_set"]!.AsArray().Count == 1 && ipOnly["route"]!["rules"]!.AsArray().OfType<JsonObject>()
+                .Single(rule => rule["rule_set"] != null)["rule_set"]!.AsArray().Single()!.ToString() == "ru-blocked",
+                "An empty domain selection keeps the GeoIP base and never references a missing domain rule set");
+            await CheckStdin(ipOnly);
+            Check(true, "IP-only shared policy passes pinned engine validation without TUN");
+        }
         foreach (string field in new[] { "certificate_path", "client_certificate_path", "client_key_path", "insecure", "handshake_timeout", "utls" })
         {
             var altered = openvpn.DeepClone();
@@ -97,6 +120,31 @@ internal static class BrokerChecks
             Reject(() => Build(plan), "Broker rejects malformed IP network");
             plan = Plan(); plan.BaseEnabled = true; plan.IpCidrs = ["192.0.2.0/24"]; plan.BaseDomains = new();
             Reject(() => Build(plan), "Enabled base cannot silently omit its domain category");
+              BrokerLocalTransport Transport() => new()
+              {
+                  ModuleId = ModuleTransport.OutlineModuleId, ProtocolVersion = 1, Port = 23456,
+                  Username = new string('A', 64), Password = new string('B', 64), InterfaceName = "Fixture"
+              };
+              plan = Plan(); plan.LocalTransport = Transport();
+              var localConfig = Build(plan);
+              var localTarget = localConfig["outbounds"]!.AsArray().Single(item => item!["tag"]!.ToString() == "vpn")!;
+              Check(localTarget["type"]!.ToString() == "socks" && localTarget["server"]!.ToString() == "127.0.0.1" &&
+                  localTarget["inet4_bind_address"]!.ToString() == "127.0.0.1" && localTarget["bind_interface"] != null,
+                  "Module outbound is authenticated SOCKS bound to Windows loopback rather than the physical default interface");
+              await CheckStdin(localConfig);
+              Check(true, "Module SOCKS outbound passes pinned sing-box validation without TUN");
+              foreach (Action<BrokerLocalTransport> mutate in new Action<BrokerLocalTransport>[]
+              {
+                  value => value.ModuleId = "unknown", value => value.ProtocolVersion = 2,
+                  value => value.Port = 80, value => value.Port = 65536,
+                  value => value.Username = "weak", value => value.Password = "weak", value => value.InterfaceName = "Changed"
+              })
+              {
+                  plan = Plan(); plan.LocalTransport = Transport(); mutate(plan.LocalTransport);
+                  Reject(() => Build(plan), "Broker rejects an unrecognized or unsafe local-module transport");
+              }
+              plan = new() { Kind = "OpenVPN", ConnectionJson = openvpn.ToJsonString(), LocalTransport = Transport() };
+              Reject(() => Build(plan), "Local Outline module cannot replace an OpenVPN connection");
         }
         await BrokerTransportChecks.Run(Check);
         await CoreCliCancellationChecks.Run(Check);

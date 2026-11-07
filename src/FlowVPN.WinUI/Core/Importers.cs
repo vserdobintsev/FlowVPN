@@ -141,12 +141,22 @@ public static class Importers
         if (name == null && fragment >= 0)
             name = Uri.UnescapeDataString(access[(fragment + 1)..]);
         var body = fragment >= 0 ? access[5..fragment] : access[5..];
+        string prefix = "";
         var qi = body.IndexOf('?');
         if (qi >= 0)
         {
             var query = body[(qi + 1)..];
-            if (query.Split('&').Any(x => x.Length > 0 && !x.StartsWith("outline=", StringComparison.OrdinalIgnoreCase)))
-                throw new Exception("Этот ключ использует расширенные параметры транспорта (например, prefix/plugin), которые пока не поддерживаются.");
+            var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            foreach (string parameter in query.Split('&', StringSplitOptions.RemoveEmptyEntries))
+            {
+                int separator = parameter.IndexOf('=');
+                if (separator < 1) throw new InvalidDataException("Некорректные параметры ключа Outline.");
+                string key = ModuleTransport.DecodeQuery(parameter[..separator]);
+                if (!seen.Add(key)) throw new InvalidDataException("Ключ Outline содержит повторяющиеся параметры.");
+                if (key.Equals("prefix", StringComparison.OrdinalIgnoreCase)) prefix = ModuleTransport.DecodeQuery(parameter[(separator + 1)..]);
+                else if (!key.Equals("outline", StringComparison.OrdinalIgnoreCase))
+                    throw new InvalidDataException("Этот ключ использует расширенные параметры транспорта, которые пока не поддерживаются.");
+            }
             body = body[..qi];
         }
         body = body.TrimEnd('/');
@@ -167,7 +177,7 @@ public static class Importers
         var uri = new Uri("tcp://" + body[(at + 1)..]);
         if (uri.AbsolutePath is not ("" or "/") || uri.UserInfo.Length > 0 || uri.Query.Length > 0 || uri.Fragment.Length > 0)
             throw new InvalidDataException("Ключ Outline содержит неподдерживаемый путь сервера.");
-        return ShadowsocksSource(uri.Host, uri.Port, method, password, name, "Outline", "Outline access key");
+        return ModuleTransport.WithOutlinePrefix(ShadowsocksSource(uri.Host, uri.Port, method, password, name, "Outline", "Outline access key"), prefix);
     }
 
     public static VpnSource Shadowsocks(string host, int port, string method, string password, string? name = null) =>
@@ -309,15 +319,13 @@ public static class Importers
         {
             if (prefix.ValueKind != JsonValueKind.String)
                 throw new InvalidDataException("Поле prefix в JSON Shadowsocks должно быть строкой.");
-            // Only the exact empty string is a no-op. Even whitespace changes transport bytes.
-            if (prefix.GetString()!.Length != 0)
-                throw new InvalidDataException("Ключ Outline использует непустой префикс Shadowsocks. Эта версия движка его не поддерживает. Используйте совместимый ключ без префикса или подключение OpenVPN.");
         }
         string Value(string key, bool allowEmpty = false) => root.TryGetProperty(key, out var value) && value.ValueKind == JsonValueKind.String &&
             value.GetString() is { } result && (allowEmpty || result.Length > 0)
                 ? result : throw new InvalidDataException("Некорректное поле JSON Shadowsocks: " + key);
         if (!root.TryGetProperty("server_port", out var portValue) || portValue.ValueKind != JsonValueKind.Number || !portValue.TryGetInt32(out int port) || port is < 1 or > 65535)
             throw new InvalidDataException("Некорректный порт JSON Shadowsocks.");
-        return ShadowsocksSource(Value("server"), port, Value("method"), Value("password", allowEmpty: true), null, "Shadowsocks", "Shadowsocks · JSON");
+        var source = ShadowsocksSource(Value("server"), port, Value("method"), Value("password", allowEmpty: true), null, "Shadowsocks", "Shadowsocks · JSON");
+        return ModuleTransport.WithOutlinePrefix(source, root.TryGetProperty("prefix", out var value) ? value.GetString()! : "");
     }
 }

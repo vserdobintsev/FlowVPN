@@ -16,9 +16,10 @@ internal sealed partial class FluentWindow
         var profile = Profile;
         if (profile == null || dialogOpen)
             return;
-        DomainCoverage? coverage = settings.BaseRulesEnabled ? DomainRepository.Current(settings.BaseDomainCategory) : null;
+        var domainSelection = BaseDomainSelection.From(settings);
+        DomainCoverage? coverage = settings.BaseRulesEnabled ? DomainRepository.Current(domainSelection.Categories) : null;
         var entries = profile.Domains.Select(d => new DomainEntry(d)).ToList();
-        var rows = new Dictionary<DomainEntry, (Border Card, TextBox Input, FontIcon Indicator)>();
+        var rows = new Dictionary<DomainEntry, (Border Card, TextBox Input, FontIcon Indicator, Button Remove)>();
         var input = new TextBox { PlaceholderText = "Домен или ссылка", HorizontalAlignment = HorizontalAlignment.Stretch };
         AutomationProperties.SetName(input, "Добавить адрес сайта");
         var add = new Button { Content = new FontIcon { Glyph = "\uE710", FontSize = 16 }, Width = 36, Height = 32 };
@@ -45,6 +46,7 @@ internal sealed partial class FluentWindow
         {
             SelectionMode = ListViewSelectionMode.None,
             HorizontalContentAlignment = HorizontalAlignment.Stretch,
+            Padding = new Thickness(0),
             MaxHeight = Math.Clamp(root.ActualHeight - 370, 155, 300)
         };
         var hint = new TextBlock { Text = "Вставляйте ссылки целиком или списком. Поддомены включаются автоматически.", FontSize = 12, Opacity = .7, TextWrapping = TextWrapping.Wrap };
@@ -90,14 +92,14 @@ internal sealed partial class FluentWindow
                 row.Card.Background = marked ? (root.ActualTheme == ElementTheme.Dark ? Color(67, 42, 45) : Color(255, 235, 238)) : new Microsoft.UI.Xaml.Media.SolidColorBrush(Microsoft.UI.Colors.Transparent);
                 row.Indicator.Visibility = marked ? Visibility.Visible : Visibility.Collapsed;
                 string message = host == null ? "Не удалось распознать домен. Можно вставить полный адрес сайта."
-                    : match != null ? $"Уже покрыт общей базой: {settings.BaseDomainCategory}, правило {match}. Дополнительное правило не требуется, пока база включена." : "";
+                    : match != null ? $"Уже покрыт общими доменными правилами: {match}. Дополнительное правило не требуется, пока база включена." : "";
                 ToolTipService.SetToolTip(row.Card, message.Length > 0 ? message : null);
                 AutomationProperties.SetHelpText(row.Input, message);
             }
             removeDuplicates.Visibility = coverage != null && duplicates > 0 ? Visibility.Visible : Visibility.Collapsed;
             dialog.IsPrimaryButtonEnabled = invalid == 0;
             status.Text = invalid > 0 ? $"Проверьте адреса: {invalid}" : duplicates > 0 ? $"Уже в общей базе: {duplicates} · в sing-box повторно не отправляются"
-                : $"Домены профиля: {entries.Count}" + (!settings.BaseRulesEnabled ? " · общая база выключена" : coverage == null ? " · доменная база ещё не загружена" : "");
+                : $"Домены профиля: {entries.Count}" + (!settings.BaseRulesEnabled ? " · общая база выключена" : domainSelection.Categories.Count == 0 ? " · общие доменные категории не выбраны" : coverage == null ? " · доменная база ещё не загружена" : "");
         }
         void Fill()
         {
@@ -108,36 +110,33 @@ internal sealed partial class FluentWindow
                 rows.Clear();
                 foreach (var entry in entries)
                 {
-                    var row = new Grid { ColumnSpacing = 8, Padding = new Thickness(8, 6, 8, 6) };
-                    row.ColumnDefinitions.Add(new()
-                    {
-                        Width = new GridLength(18)
-                    });
+                    var row = new Grid { ColumnSpacing = 8, Padding = new Thickness(0, 6, 0, 6) };
                     row.ColumnDefinitions.Add(new()
                     {
                         Width = new GridLength(1, GridUnitType.Star)
                     });
                     row.ColumnDefinitions.Add(new()
                     {
-                        Width = new GridLength(34)
+                        Width = GridLength.Auto
                     });
-                    var indicator = new FontIcon { Glyph = "\uE946", FontSize = 15, Foreground = root.ActualTheme == ElementTheme.Dark ? Color(255, 175, 183) : Color(155, 38, 53) };
-                    row.Children.Add(indicator);
-                    var edit = new TextBox { Text = entry.Text, BorderThickness = new Thickness(0), HorizontalAlignment = HorizontalAlignment.Stretch };
-                    Grid.SetColumn(edit, 1);
+                    var edit = new TextBox { Text = entry.Text, HorizontalAlignment = HorizontalAlignment.Stretch };
                     row.Children.Add(edit);
                     AutomationProperties.SetName(edit, "Домен профиля");
-                    var remove = new Button { Content = new FontIcon { Glyph = "\uE74D", FontSize = 14 }, Width = 32, Height = 32, Padding = new Thickness(0), BorderThickness = new Thickness(0), VerticalAlignment = VerticalAlignment.Center };
+                    var actions = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8, VerticalAlignment = VerticalAlignment.Center };
+                    var indicator = new FontIcon { Glyph = "\uE946", FontSize = 15, VerticalAlignment = VerticalAlignment.Center, Foreground = root.ActualTheme == ElementTheme.Dark ? Color(255, 175, 183) : Color(155, 38, 53) };
+                    actions.Children.Add(indicator);
+                    var remove = new Button { Content = new FontIcon { Glyph = "\uE74D", FontSize = 14 }, Width = 36, Height = 32, Padding = new Thickness(0), BorderThickness = new Thickness(0), VerticalAlignment = VerticalAlignment.Center };
                     ToolTipService.SetToolTip(remove, "Удалить домен");
                     AutomationProperties.SetName(remove, "Удалить " + entry.Text);
-                    Grid.SetColumn(remove, 2);
-                    row.Children.Add(remove);
+                    actions.Children.Add(remove);
+                    Grid.SetColumn(actions, 1);
+                    row.Children.Add(actions);
                     var card = new Border { Child = row, CornerRadius = new CornerRadius(7) };
-                    rows[entry] = (card, edit, indicator);
+                    rows[entry] = (card, edit, indicator, remove);
                     edit.TextChanged += (_, _) => { entry.Text = edit.Text; if (rows.Count == entries.Count) Validate(); };
                     edit.LostFocus += (_, _) => { if (!rebuilding && !closed && rows.ContainsKey(entry) && Host(entry) is { } host) edit.Text = host; };
                     remove.Click += (_, _) => { entries.Remove(entry); Fill(); };
-                    list.Items.Add(new ListViewItem { Content = card, Padding = new Thickness(0), Margin = new Thickness(0, 3, 0, 3), HorizontalContentAlignment = HorizontalAlignment.Stretch });
+                    list.Items.Add(new ListViewItem { Content = card, Padding = new Thickness(0), BorderThickness = new Thickness(0), Margin = new Thickness(0, 3, 0, 3), HorizontalContentAlignment = HorizontalAlignment.Stretch });
                 }
                 if (entries.Count == 0)
                     list.Items.Add(new TextBlock { Text = "Добавьте сайты, которые должны открываться через VPN.", FontSize = 13, Opacity = .7, TextWrapping = TextWrapping.Wrap, Margin = new Thickness(12) });
@@ -180,7 +179,7 @@ internal sealed partial class FluentWindow
         if (Entry.VisualTest)
             entries = [new("chatgpt.com"), new("sub.chatgpt.com"), new("example.com")];
         Fill();
-        ReviewDialog(dialog);
+        ReviewDialog(dialog, () => CheckDomainEditorLayout(panel, input, rows.Values));
         dialogOpen = true;
         try
         {

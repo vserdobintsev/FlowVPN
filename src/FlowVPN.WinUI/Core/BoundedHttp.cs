@@ -31,18 +31,37 @@ internal static class BoundedHttp
         }
         throw new HttpRequestException("Слишком много перенаправлений источника.");
     }
-    public static async Task<byte[]> Download(HttpClient client, string url, int maxBytes, CancellationToken token)
+    public static async Task<byte[]> Download(HttpClient client, string url, int maxBytes, CancellationToken token,
+        IProgress<TransferProgress>? progress = null, string item = "Файл")
     {
+        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(maxBytes);
         using var response = await Open(client, Https(url), token);
         if (response.Content.Headers.ContentLength > maxBytes)
             throw new InvalidDataException("Ответ источника больше ожидаемого размера.");
         using var stream = await response.Content.ReadAsStreamAsync(token);
+        long? total = response.Content.Headers.ContentLength;
+        long lastReport = System.Diagnostics.Stopwatch.GetTimestamp();
+        void Report(long received, bool final = false)
+        {
+            if (progress == null || (!final && received > 0 && System.Diagnostics.Stopwatch.GetElapsedTime(lastReport).TotalMilliseconds < 100)) return;
+            lastReport = System.Diagnostics.Stopwatch.GetTimestamp();
+            progress.Report(new(item, TransferStage.Downloading, received, total));
+        }
+        Report(0);
         if (response.Content.Headers.ContentLength is long length)
         {
             var bytes = new byte[checked((int)length)];
-            await stream.ReadExactlyAsync(bytes, token);
+            int received = 0;
+            while (received < bytes.Length)
+            {
+                int read = await stream.ReadAsync(bytes.AsMemory(received, Math.Min(65536, bytes.Length - received)), token);
+                if (read == 0) throw new EndOfStreamException("Ответ источника оборвался до завершения загрузки.");
+                received += read;
+                Report(received);
+            }
             if (await stream.ReadAsync(new byte[1], token) != 0)
                 throw new InvalidDataException("Размер ответа источника не совпал.");
+            Report(received, final: true);
             return bytes;
         }
         using var buffer = new MemoryStream();
@@ -53,7 +72,9 @@ internal static class BoundedHttp
             if (buffer.Length + count > maxBytes)
                 throw new InvalidDataException("Ответ источника больше ожидаемого размера.");
             buffer.Write(chunk, 0, count);
+            Report(buffer.Length);
         }
+        Report(buffer.Length, final: true);
         return buffer.ToArray();
     }
 }

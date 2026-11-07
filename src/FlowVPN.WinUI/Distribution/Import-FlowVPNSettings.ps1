@@ -67,6 +67,69 @@ function Check-Boolean($Object, [string[]]$Names) {
         }
     }
 }
+function Check-ObjectFields($Node, [string[]]$Allowed) {
+    Require-Kind $Node 'Object'
+    $seen = [Collections.Generic.HashSet[string]]::new([StringComparer]::Ordinal)
+    foreach ($field in $Node.AsObject()) {
+        if ($field.Key -cnotin $Allowed -or !$seen.Add($field.Key)) { throw 'Unknown or duplicate module transport field.' }
+    }
+}
+function Check-Transport($Source) {
+    # Legacy sources stay byte-for-byte equivalent; a null descriptor means no optional transport.
+    if (!$Source.ContainsKey('Transport') -or $null -eq $Source['Transport']) { return }
+    $transport = $Source['Transport']
+    Check-ObjectFields $transport @('ModuleId','SchemaVersion','Outline')
+    Require-Kind $Source['Kind'] 'String'
+    Require-Kind $transport['ModuleId'] 'String'
+    if ($Source['Kind'].ToString() -cne 'Outline' -or $transport['ModuleId'].ToString() -cne 'outline-transport') {
+        throw 'Unsupported module transport.'
+    }
+    if ($transport.AsObject().ContainsKey('SchemaVersion')) {
+        Require-Kind $transport['SchemaVersion'] 'Number'
+        $version = 0
+        if (![int]::TryParse($transport['SchemaVersion'].ToString(), [ref]$version) -or $version -ne 1) { throw 'Unsupported module transport schema.' }
+    }
+    $options = $transport['Outline']
+    Check-ObjectFields $options @('PrefixBase64')
+    Require-Kind $options['PrefixBase64'] 'String'
+    Require-Kind $Source['ConnectionJson'] 'String'
+    $raw = $Source['ConnectionJson'].ToString()
+    if ($raw.Length -lt 1 -or $raw.Length -gt 4MB) { throw 'Invalid module source configuration size.' }
+    try {
+        $jsonOptions = [Text.Json.JsonDocumentOptions]::new()
+        $jsonOptions.MaxDepth = 12
+        $connection = [Text.Json.Nodes.JsonNode]::Parse($raw, $null, $jsonOptions)
+    } catch { throw 'Invalid module source configuration JSON.' }
+    # Match BrokerConfig.Source and ModuleTransport.OutlineParameters; do not accept raw routing/code fields.
+    Check-ObjectFields $connection @('type','tag','server','server_port','method','password','domain_resolver')
+    foreach ($name in @('type','tag','server','method','password','domain_resolver')) { Require-Kind $connection[$name] 'String' }
+    if ($connection['type'].ToString() -cne 'shadowsocks' -or $connection['tag'].ToString() -cne 'vpn' -or $connection['domain_resolver'].ToString() -cne 'dns-direct') {
+        throw 'Invalid module source configuration type or routing tags.'
+    }
+    $server = $connection['server'].ToString()
+    if ($server.Length -lt 1 -or $server.Length -gt 253 -or $server -match '[\s\p{Cc}]' -or [Uri]::CheckHostName($server) -eq [UriHostNameType]::Unknown) {
+        throw 'Invalid module server address.'
+    }
+    Require-Kind $connection['server_port'] 'Number'
+    $port = 0
+    if (![int]::TryParse($connection['server_port'].ToString(), [ref]$port) -or $port -lt 1 -or $port -gt 65535) { throw 'Invalid module server port.' }
+    if ($connection['password'].ToString().Length -gt 65536) { throw 'Module credential exceeds its limit.' }
+    $prefixLimit = switch -CaseSensitive ($connection['method'].ToString()) {
+        'aes-128-gcm' { 8 }
+        'aes-256-gcm' { 16 }
+        'chacha20-ietf-poly1305' { 16 }
+        default { throw 'The encryption method does not support this module transport.' }
+    }
+    $encoded = $options['PrefixBase64'].ToString()
+    if ($encoded.Length -lt 1 -or $encoded.Length -gt 24) { throw 'Invalid module prefix encoding.' }
+    $prefix = $null
+    try {
+        try { $prefix = [Convert]::FromBase64String($encoded) } catch { throw 'Invalid module prefix encoding.' }
+        if ($prefix.Length -lt 1 -or $prefix.Length -gt $prefixLimit -or [Convert]::ToBase64String($prefix) -cne $encoded) {
+            throw 'Invalid or oversized module prefix.'
+        }
+    } finally { if ($null -ne $prefix) { [Array]::Clear($prefix, 0, $prefix.Length) } }
+}
 function Check-ApplicationSets($Object) {
     # Older settings have no saved sets. Unknown application IDs remain portable references.
     if (!$Object.ContainsKey('ApplicationSets')) { return }
@@ -104,11 +167,73 @@ function Check-ApplicationSets($Object) {
         }
     }
 }
+function Get-CanonicalDomainCategories([string[]]$Ids, [int]$Maximum = 33) {
+    if ($Ids.Count -gt $Maximum) { throw 'Too many domain categories.' }
+    $unique = [Collections.Generic.HashSet[string]]::new([StringComparer]::Ordinal)
+    foreach ($value in $Ids) {
+        if ([string]::IsNullOrWhiteSpace($value)) { throw 'Missing domain category.' }
+        $id = $value.Trim().ToLowerInvariant()
+        if ($id -cnotmatch '\A[a-z0-9][a-z0-9_!@.-]{0,100}\z' -or $id -ceq 'none') { throw 'Invalid domain category.' }
+        $null = $unique.Add($id)
+    }
+    $result = [string[]]@($unique)
+    [Array]::Sort($result, [StringComparer]::Ordinal)
+    return ,$result
+}
+function Get-DomainRuleKey([string[]]$Ids) {
+    $canonical = Get-CanonicalDomainCategories $Ids
+    return [Convert]::ToHexString([Security.Cryptography.SHA256]::HashData([Text.Encoding]::UTF8.GetBytes([string]::Join("`n", $canonical))))
+}
+function Get-DomainSelection($Settings) {
+    $object = $Settings.AsObject()
+    $category = 'ru-blocked'
+    if ($object.ContainsKey('BaseDomainCategory')) {
+        Require-Kind $object['BaseDomainCategory'] 'String'
+        $category = $object['BaseDomainCategory'].ToString().Trim().ToLowerInvariant()
+        if ($category -cnotmatch '\A[a-z0-9][a-z0-9_!@.-]{0,100}\z') { throw 'Invalid primary domain category.' }
+    }
+    $extras = [Collections.Generic.List[string]]::new()
+    if ($object.ContainsKey('AdditionalDomainCategories')) {
+        Require-Kind $object['AdditionalDomainCategories'] 'Array'
+        if ($object['AdditionalDomainCategories'].AsArray().Count -gt 32) { throw 'At most 32 additional domain categories are supported.' }
+        foreach ($entry in $object['AdditionalDomainCategories'].AsArray()) {
+            Require-Kind $entry 'String'
+            $extras.Add($entry.ToString())
+        }
+    }
+    $additional = Get-CanonicalDomainCategories $extras.ToArray() 32
+    if ($category -cnotin @('ru-blocked','ru-blocked-all','none')) {
+        $additional = Get-CanonicalDomainCategories ([string[]]@($additional + $category))
+        if ($additional.Count -gt 32) { throw 'At most 32 additional domain categories are supported.' }
+        $category = 'none'
+    }
+    [string[]]$categories = $additional
+    if ($category -cne 'none') { $categories = Get-CanonicalDomainCategories ([string[]]@($additional + $category)) }
+    return [pscustomobject]@{ BaseCategory = $category; AdditionalCategories = [string[]]$additional; Categories = [string[]]@($categories); RuleKey = Get-DomainRuleKey ([string[]]@($categories)) }
+}
+function Check-DomainCacheMetadata($Meta, [string[]]$Categories) {
+    Require-Kind $Meta 'Object'
+    Require-Kind $Meta['schemaVersion'] 'Number'
+    if ($Meta['schemaVersion'].ToString() -cne '2') { throw 'Unsupported prepared domain cache schema.' }
+    Require-Kind $Meta['categories'] 'Array'
+    $ids = [Collections.Generic.List[string]]::new()
+    foreach ($entry in $Meta['categories'].AsArray()) { Require-Kind $entry 'String'; $ids.Add($entry.ToString()) }
+    $canonical = Get-CanonicalDomainCategories $ids.ToArray()
+    if ($canonical.Count -eq 0 -or $canonical.Count -ne $ids.Count -or [string]::Join("`n", $canonical) -cne [string]::Join("`n", (Get-CanonicalDomainCategories $Categories))) { throw 'Prepared domain cache membership mismatch.' }
+    foreach ($field in @('sha256','sourceSha256')) {
+        Require-Kind $Meta[$field] 'String'
+        if ($Meta[$field].ToString() -cnotmatch '\A[0-9a-fA-F]{64}\z') { throw 'Invalid prepared domain cache checksum.' }
+    }
+    Require-Kind $Meta['size'] 'Number'
+    $size = 0L
+    if (![long]::TryParse($Meta['size'].ToString(), [ref]$size) -or $size -le 0 -or $size -gt 32MB) { throw 'Invalid prepared domain cache size.' }
+}
 function Check-Settings($Settings) {
     Require-Kind $Settings 'Object'
     $object = $Settings.AsObject()
     Check-Strings $object @('BaseDomainCategory', 'SelectedProfileId')
     Check-Boolean $object @('BaseRulesEnabled', 'AutoUpdateRules', 'StartInTray', 'ProfileOnboardingCompleted')
+    $null = Get-DomainSelection $Settings
     Check-ApplicationSets $object
     foreach ($name in @('Version', 'Appearance')) {
         if ($object.ContainsKey($name)) {
@@ -129,6 +254,7 @@ function Check-Settings($Settings) {
             if ($collection -eq 'Sources') {
                 Check-Strings $item @('Name','Kind','DynamicKey','ConnectionJson','Origin','Fingerprint')
                 if ($item.ContainsKey('Kind') -and $item['Kind'].ToString() -cnotin @('OpenVPN','Outline')) { throw 'Unsupported connection type.' }
+                Check-Transport $item
             } else {
                 Check-Strings $item @('Name','SourceId','Mode','Icon')
                 if ($item.ContainsKey('Mode') -and $item['Mode'].ToString() -cnotin @('include','exclude','all')) { throw 'Unsupported profile mode.' }
@@ -194,6 +320,23 @@ function Add-CachePair([string]$DataName, [string]$MetaName, [long]$Maximum, [bo
     if ($meta.AsObject().ContainsKey('bytes') -and ($null -eq $meta['bytes'] -or $meta['bytes'].ToString() -cne $plan[$DataName].Length.ToString())) { throw 'Rule cache size does not match its metadata.' }
     Add-CacheFile $MetaName 64KB ([Convert]::ToHexString([Security.Cryptography.SHA256]::HashData($metaBytes)))
 }
+function Add-SelectedDomainCache($Selection, [bool]$Required) {
+    if ($Selection.Categories.Count -eq 0) { return }
+    $dataName = if ($Selection.Categories.Count -eq 1) { "domains-$($Selection.Categories[0]).json" } else { "domain-selection-$($Selection.RuleKey).json" }
+    $metaName = "domain-cache-$($Selection.RuleKey).json"
+    if (!(Test-Path -LiteralPath (Join-Path $rules $metaName) -PathType Leaf)) {
+        if ($Selection.Categories.Count -eq 1) {
+            Add-CachePair $dataName "domains-$($Selection.Categories[0])-metadata.json" 32MB $Required $Selection.Categories[0]
+        } elseif ($Required -or (Test-Path -LiteralPath (Join-Path $rules $dataName))) { throw 'The selected prepared domain union is missing its metadata.' }
+        return
+    }
+    $metaBytes = Read-Limited (Join-Path $rules $metaName) 64KB
+    $meta = Parse-Json $metaBytes
+    Check-DomainCacheMetadata $meta $Selection.Categories
+    Add-CacheFile $dataName 32MB $meta['sha256'].ToString()
+    if ($meta['size'].ToString() -cne $plan[$dataName].Length.ToString()) { throw 'Prepared domain cache size mismatch.' }
+    Add-CacheFile $metaName 64KB ([Convert]::ToHexString([Security.Cryptography.SHA256]::HashData($metaBytes)))
+}
 function Set-PrivateDirectory([string]$Path) {
     $null = Assert-LocalPath $Path
     $null = [IO.Directory]::CreateDirectory($Path)
@@ -213,20 +356,17 @@ try {
     if ($clear.Length -gt $limit) { throw 'Decrypted settings exceed 8 MiB.' }
     $settings = Parse-Json $clear
     Check-Settings $settings
-    $category = if ($null -eq $settings['BaseDomainCategory']) { 'ru-blocked' } else { $settings['BaseDomainCategory'].ToString() }
-    if ($category -notmatch '\A[a-z0-9][a-z0-9_!@.-]{0,100}\z') { throw 'Invalid selected domain category.' }
+    $domainSelection = Get-DomainSelection $settings
+    $settings['BaseDomainCategory'] = [Text.Json.Nodes.JsonNode]::Parse('"' + $domainSelection.BaseCategory + '"')
+    $settings['AdditionalDomainCategories'] = [Text.Json.Nodes.JsonArray]::new()
+    foreach ($id in $domainSelection.AdditionalCategories) { $settings['AdditionalDomainCategories'].AsArray().Add([Text.Json.Nodes.JsonNode]::Parse('"' + $id + '"')) }
     $baseEnabled = $null -eq $settings['BaseRulesEnabled'] -or $settings['BaseRulesEnabled'].GetValueKind().ToString() -eq 'True'
     $rules = Assert-LocalPath $(if ($RulesSource) { (Resolve-Path -LiteralPath $RulesSource).ProviderPath } else { Join-Path $source 'rules' })
     if (Test-Path -LiteralPath $rules -PathType Container) {
         Add-CachePair 'ru-blocked.srs' 'metadata.json' 16MB $baseEnabled
-        Add-CachePair "domains-$category.json" "domains-$category-metadata.json" 128MB $baseEnabled $category
+        Add-SelectedDomainCache $domainSelection $baseEnabled
         Add-CachePair 'geosite.dat' 'geosite-metadata.json' 128MB $false
-        foreach ($file in Get-ChildItem -LiteralPath $rules -File -Filter 'domains-*-metadata.json') {
-            if ($file.Name -cmatch '\Adomains-([a-z0-9][a-z0-9_!@.-]{0,100})-metadata\.json\z') {
-                $id = $Matches[1]
-                if ($id -cne $category) { Add-CachePair "domains-$id.json" $file.Name 128MB $true $id }
-            }
-        }
+        # Only effective prepared rules are required. Other combinations can be rebuilt from the validated archive.
         $catalogPath = Join-Path $rules 'domain-categories.json'
         if ($plan.ContainsKey('geosite.dat') -and (Test-Path -LiteralPath $catalogPath -PathType Leaf)) {
             $catalogBytes = Read-Limited $catalogPath 8MB
@@ -240,7 +380,8 @@ try {
             $metaBytes = Read-Limited (Join-Path $rules 'geosite-metadata.json') 64KB
             if ([Convert]::ToHexString([Security.Cryptography.SHA256]::HashData($metaBytes)) -cne $plan['geosite-metadata.json'].Hash) { throw 'Rule metadata changed during validation.' }
             $meta = Parse-Json $metaBytes
-            if ($null -eq $meta['categories'] -or $meta['categories'].ToString() -cne $ids.Count.ToString() -or ($baseEnabled -and !$ids.Contains($category))) { throw 'Domain category catalogue does not match its metadata.' }
+            if ($null -eq $meta['categories'] -or $meta['categories'].ToString() -cne $ids.Count.ToString()) { throw 'Domain category catalogue does not match its metadata.' }
+            if ($baseEnabled) { foreach ($id in $domainSelection.Categories) { if (!$ids.Contains($id)) { throw 'A selected domain category is missing from the catalogue.' } } }
             Add-CacheFile 'domain-categories.json' 8MB ([Convert]::ToHexString([Security.Cryptography.SHA256]::HashData($catalogBytes)))
         }
     } elseif ($baseEnabled) { throw 'The active base requires a validated GeoIP cache and selected domain category.' }

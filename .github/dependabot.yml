@@ -1,5 +1,17 @@
 version: 2
 updates:
+  - package-ecosystem: gomod
+    directory: /modules/outline-transport
+    schedule:
+      interval: weekly
+      day: monday
+      time: '09:00'
+      timezone: Europe/Moscow
+    open-pull-requests-limit: 3
+    commit-message:
+      prefix: build
+      include: scope
+    labels: [dependencies]
   - package-ecosystem: github-actions
     directory: /
     schedule:

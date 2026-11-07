@@ -17,15 +17,18 @@ internal sealed partial class FluentWindow
     void HookUpdates()
     {
         settings.Updates ??= new();
+        bool channelsLoaded = true;
         try
         {
             updateChannels = UpdateChannels.Load();
         }
-        catch (Exception e) { updateStatus = e.Message; }
+        catch (Exception e) { updateStatus = e.Message; channelsLoaded = false; }
         if (Version.TryParse(settings.Updates.PendingVersion, out var pending) && pending <= updateIdentity.Version)
             settings.Updates.PendingVersion = "";
         C<ComboBox>("UpdateChannelCombo").ItemsSource = updateChannels.Channels;
         C<ComboBox>("UpdateChannelCombo").SelectedItem = updateChannels.Channels.FirstOrDefault(c => c.Id == settings.Updates.Channel) ?? updateChannels.Channels.FirstOrDefault();
+        if (channelsLoaded)
+            updateStatus = Channel?.FeedUrl.Length > 0 ? "Можно проверить наличие обновлений." : "Канал обновлений ещё не настроен.";
         C<ToggleSwitch>("CheckUpdatesSwitch").IsOn = settings.Updates.CheckWhileOpen;
         C<ComboBox>("UpdateChannelCombo").SelectionChanged += (_, _) =>
         {
@@ -85,12 +88,18 @@ internal sealed partial class FluentWindow
             ? installedCore + " · совместимость проверена"
             : installedCore + " · для этой сборки проверена " + expectedCore;
         C<TextBlock>("UpdateStatus").Text = updateStatus;
-        C<TextBlock>("LastUpdateCheck").Text = settings.Updates.LastCheckedUtc is DateTimeOffset at
+        var lastCheck = C<TextBlock>("LastUpdateCheck");
+        lastCheck.Text = !configured ? "" : settings.Updates.LastCheckedUtc is DateTimeOffset at
             ? "Последняя успешная проверка: " + at.ToLocalTime().ToString("g") + " · " + (settings.Updates.LastCheckedChannel == "stable" ? "стабильный" : "предварительный") : "Проверок ещё не было";
+        lastCheck.Visibility = configured ? Visibility.Visible : Visibility.Collapsed;
         bool differentIdentity = Channel != null && Channel.PackageName != updateIdentity.Name;
-        C<TextBlock>("UpdateSourceText").Text = differentIdentity ? "Этот канал устанавливается отдельно: у него другой пакет и свои настройки." : configured ? new Uri(Channel!.FeedUrl).Host : "Адрес публикации пока не задан";
+        var sourceText = C<TextBlock>("UpdateSourceText");
+        sourceText.Text = !configured ? "" : differentIdentity ? "Этот канал устанавливается отдельно: у него другой пакет и свои настройки." : new Uri(Channel!.FeedUrl).Host;
+        sourceText.Visibility = configured ? Visibility.Visible : Visibility.Collapsed;
         C<TextBlock>("UpdateReleaseNotes").Text = offeredRelease?.Notes ?? "Новые версии FlowVPN поставляются вместе с проверенным sing-box. База блокировок обновляется отдельно.";
-        C<TextBlock>("AvailableVersion").Text = offeredRelease == null ? "" : $"FlowVPN {offeredRelease.Version} · sing-box {offeredRelease.CoreVersion}";
+        var availableVersion = C<TextBlock>("AvailableVersion");
+        availableVersion.Text = offeredRelease == null ? "" : $"FlowVPN {offeredRelease.Version} · sing-box {offeredRelease.CoreVersion}";
+        availableVersion.Visibility = offeredRelease == null ? Visibility.Collapsed : Visibility.Visible;
         C<ProgressRing>("AppUpdateProgress").IsActive = busy;
         C<ProgressRing>("AppUpdateProgress").Visibility = busy ? Visibility.Visible : Visibility.Collapsed;
         C<ComboBox>("UpdateChannelCombo").IsEnabled = !busy;
@@ -106,6 +115,21 @@ internal sealed partial class FluentWindow
         C<InfoBar>("UpdateModeInfo").Message = Entry.Preview ? "В предпросмотре можно проверять версии. Установка обновлений отключена."
             : !UpdateProtocol.IsPackaged ? "Установку обновлений через Windows поддерживает версия MSIX. Эта сборка переносимая."
             : "Обновление подготовится без закрытия FlowVPN. Применение — при следующем запуске после завершения приложения.";
+    }
+    void LayoutUpdateVersions()
+    {
+        double available = C<StackPanel>("UpdatesContent").ActualWidth;
+        if (available <= 0) return;
+        var grid = C<Grid>("InstalledVersions");
+        double width = Math.Min(640, available);
+        if (double.IsNaN(grid.Width) || Math.Abs(grid.Width - width) > .5) grid.Width = width;
+        bool sideBySide = width >= 600;
+        grid.ColumnDefinitions[0].Width = sideBySide ? GridLength.Auto : new(1, GridUnitType.Star);
+        grid.ColumnDefinitions[1].Width = sideBySide ? new(1, GridUnitType.Star) : new(0);
+        grid.ColumnSpacing = sideBySide ? 32 : 0;
+        grid.RowSpacing = sideBySide ? 0 : 16;
+        Grid.SetColumn(C<StackPanel>("CoreVersionInfo"), sideBySide ? 1 : 0);
+        Grid.SetRow(C<StackPanel>("CoreVersionInfo"), sideBySide ? 0 : 1);
     }
     async Task CheckAppUpdate(bool manual)
     {

@@ -4,13 +4,30 @@ using System.Text.RegularExpressions;
 
 namespace FlowVPN;
 
+public enum DomainCategoryGroup { SitesAndOther, Themes, Regions, Technical, Blocklists }
+
 public sealed record DomainCategory(string Id, string Name, string Description)
 {
+    public DomainCategoryGroup Group => DomainCategories.GroupOf(Id);
     public override string ToString() => Name + " · " + Id;
 }
 
 public static class DomainCategories
 {
+    // Upstream naming conventions: https://github.com/v2fly/domain-list-community#how-to-organize-domains
+    // Regional exceptions are confirmed source entries. Two-letter ids also name brands, so ISO-code inference is unsafe.
+    public static DomainCategoryGroup GroupOf(string id) => id switch
+    {
+        "cn" or "category-ru" or "category-ir" or "category-tm" or "ru-available-only-inside" => DomainCategoryGroup.Regions,
+        _ when id.StartsWith("geolocation-", StringComparison.Ordinal) => DomainCategoryGroup.Regions,
+        "private" or "category-doh" or "category-ddns" or "category-ntp" or "category-stun" or "category-ipfs" => DomainCategoryGroup.Technical,
+        _ when id.StartsWith("tld-", StringComparison.Ordinal) || id.StartsWith("win-", StringComparison.Ordinal) || id.StartsWith("category-ntp-", StringComparison.Ordinal) => DomainCategoryGroup.Technical,
+        "ru-blocked" or "ru-blocked-all" or "refilter" => DomainCategoryGroup.Blocklists,
+        _ when id.StartsWith("antifilter-", StringComparison.Ordinal) => DomainCategoryGroup.Blocklists,
+        _ when id.StartsWith("category-", StringComparison.Ordinal) => DomainCategoryGroup.Themes,
+        _ => DomainCategoryGroup.SitesAndOther
+    };
+
     static string CatalogPath => Path.Combine(Store.Rules, "domain-categories.json");
     public static DomainCategory Describe(string id) => id switch
     {
@@ -27,6 +44,7 @@ public static class DomainCategories
         "win-update" => new(id, "Обновления Windows", "Домены служб обновления Windows."),
         "win-extra" => new(id, "Другие сервисы Windows", "Дополнительные домены Windows из списка источника."),
         "private" => new(id, "Частные домены", "Служебные и частные имена из списка источника. Их маршрутизация через VPN может повлиять на доступ к локальным сервисам."),
+        "ru-available-only-inside" => new(id, "Доступные только из России", "Зарубежный VPN может мешать доступу к этим сайтам."),
         _ => new(id, id, "Категория, опубликованная RunetFreedom. Её домены направляются через VPN.")
     };
     public static IReadOnlyList<DomainCategory> Read()
@@ -38,5 +56,5 @@ public static class DomainCategories
         }
         catch (Exception e) when (e is IOException or JsonException or ArgumentException) { return [Describe("ru-blocked"), Describe("ru-blocked-all")]; }
     }
-    public static Task Update(HttpClient client) => GeoSiteArchive.Update(client, true);
+    public static Task Update(HttpClient client, CancellationToken token = default, IProgress<TransferProgress>? progress = null) => GeoSiteArchive.Update(client, true, token, progress);
 }

@@ -19,5 +19,5 @@
     "default_workflow_permissions": "read",
     "can_approve_pull_request_reviews": false
   },
-  "requiredChecks": ["Build (Release)", "Build (Preview)", "Conventional title"]
+  "requiredChecks": ["Build (Release)", "Build (Preview)", "Outline transport", "Conventional title"]
 }
