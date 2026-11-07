@@ -117,6 +117,7 @@ internal sealed partial class FluentWindow
         }
         await CheckOperationLayout(scale, folder);
         await CheckWorkspaceLayout(scale, folder);
+        await CheckSidebarLayout(scale, folder);
         await CheckModuleCards(scale, folder);
         await CheckDeveloperIdentityLayout(scale, folder);
         await CheckSidebarNavigation(scale, folder);
@@ -200,6 +201,8 @@ internal sealed partial class FluentWindow
         if (C<TextBlock>("LogScope").Text.Contains(Profile?.Name ?? "missing") == false)
             throw new Exception("Journal scope missing");
         SelectPage(0);
+        await CheckProfileSources();
+        await CheckProfileIdentity();
         visualDialogName = "profile-icons";
         await EditProfileIcon();
         root.RequestedTheme = ElementTheme.Dark;

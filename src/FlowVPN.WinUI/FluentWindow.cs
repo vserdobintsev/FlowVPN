@@ -101,7 +101,7 @@ internal sealed partial class FluentWindow : Window
         });
         Hook("ValidateButton", Validate);
         C<ListView>("ProfileList").SelectionChanged += (_, _) => { if (binding) return; settings.SelectedProfileId = Profile?.Id ?? ""; Store.Save(settings); BindProfile(); SelectPage(0); Pending(); UpdateTray(); };
-        C<ComboBox>("SourceCombo").SelectionChanged += (_, _) => { if (binding || Profile == null) return; Profile.SourceId = (C<ComboBox>("SourceCombo").SelectedItem as ComboBoxItem)?.Tag as string ?? ""; Save(); };
+        C<ComboBox>("SourceCombo").SelectionChanged += (_, _) => ChangeProfileSource(C<ComboBox>("SourceCombo"));
         C<ComboBox>("ModeCombo").SelectionChanged += (_, _) => { if (binding || Profile == null) return; Profile.Mode = new[] { "include", "exclude", "all" }[Math.Max(0, C<ComboBox>("ModeCombo").SelectedIndex)]; Save(); UpdateMode(); };
         C<ListView>("AppList").SelectionChanged += (_, _) => C<Button>("RemoveApps").IsEnabled = C<ListView>("AppList").SelectedItems.Count > 0;
         C<ListView>("SourceList").SelectionChanged += (_, _) => { C<Button>("RenameSourceButton").IsEnabled = Source != null; C<Button>("DeleteSourceButton").IsEnabled = Source != null; };
@@ -142,6 +142,7 @@ internal sealed partial class FluentWindow : Window
             list.Items.Clear();
             profileLabels.Clear();
             profileDots.Clear();
+            profileSourceLabels.Clear();
             foreach (var p in settings.Profiles)
             {
                 var normal = ProfileNormal(p);
@@ -161,14 +162,12 @@ internal sealed partial class FluentWindow : Window
             }
             if (list.SelectedIndex < 0 && list.Items.Count > 0)
                 list.SelectedIndex = 0;
-            var combo = C<ComboBox>("SourceCombo");
-            combo.Items.Clear();
+            RefreshProfileSourceOptions();
             var sl = C<ListView>("SourceList");
             sl.Items.Clear();
             foreach (var s in settings.Sources)
             {
                 string kind = ConnectionTypeLabel(s);
-                combo.Items.Add(new ComboBoxItem { Content = s.Name + " · " + kind, Tag = s.Id });
                 string detail = string.IsNullOrWhiteSpace(s.Origin) ? kind : kind + " · " + s.Origin.Trim();
                 sl.Items.Add(Card(s.Name, detail, "\uE968", s));
             }
@@ -216,8 +215,7 @@ internal sealed partial class FluentWindow : Window
         {
             var p = Profile;
             C<TextBlock>("ProfileHeading").Text = p?.Name ?? "Создайте профиль";
-            var combo = C<ComboBox>("SourceCombo");
-            combo.SelectedItem = combo.Items.OfType<ComboBoxItem>().FirstOrDefault(i => (string)i.Tag == p?.SourceId);
+            BindProfileSourceSelection(p);
             C<ComboBox>("ModeCombo").SelectedIndex = p?.Mode == "exclude" ? 1 : p?.Mode == "all" ? 2 : 0;
             BindProfileSettings(p);
             BindApplications(p);
@@ -322,19 +320,25 @@ internal sealed partial class FluentWindow : Window
         if (root.ActualWidth <= 0)
             return;
         compact = root.ActualWidth < 1050;
+        // Give the navigation the space that would otherwise become a gap beside
+        // the capped workspace, without narrowing forms in a normal-sized window.
+        double sidebarWidth = compact ? 80 : Math.Clamp(root.ActualWidth - WorkspaceContentWidth, 248, 360);
+        var sidebar = C<ColumnDefinition>("SidebarColumn");
+        if (Math.Abs(sidebar.Width.Value - sidebarWidth) > .5)
+            sidebar.Width = new GridLength(sidebarWidth);
         double contentInset = compact ? 18 : 28;
         var mainScroll = C<ScrollViewer>("MainScroll");
         var statusPanel = C<StackPanel>("OperationStatusPanel");
-        statusPanel.Margin = new Thickness(0, 4, 0, 12);
-        statusPanel.HorizontalAlignment = HorizontalAlignment.Center;
+        statusPanel.Margin = new Thickness(contentInset, 4, 0, 12);
+        statusPanel.HorizontalAlignment = HorizontalAlignment.Left;
         double viewportHeight = mainScroll.ActualHeight;
         if (viewportHeight <= 0)
             viewportHeight = Math.Max(0, root.ActualHeight - (statusPanel.Visibility == Visibility.Visible ? statusPanel.ActualHeight + statusPanel.Margin.Top + statusPanel.Margin.Bottom : 0));
         var mainArea = C<Grid>("MainArea");
-        double viewportWidth = mainScroll.ViewportWidth > 0 ? mainScroll.ViewportWidth : mainScroll.ActualWidth;
-        if (viewportWidth <= 0) viewportWidth = Math.Max(0, root.ActualWidth - (compact ? 80 : 248));
+        // The viewport can still report its previous size during a resize event.
+        double viewportWidth = Math.Max(0, root.ActualWidth - sidebarWidth);
         double contentWidth = Math.Min(WorkspaceContentWidth, viewportWidth);
-        mainArea.HorizontalAlignment = HorizontalAlignment.Center;
+        mainArea.HorizontalAlignment = HorizontalAlignment.Left;
         if (double.IsNaN(mainArea.Width) || Math.Abs(mainArea.Width - contentWidth) > .5)
             mainArea.Width = contentWidth;
         double statusWidth = Math.Max(0, contentWidth - 2 * contentInset);
@@ -343,11 +347,11 @@ internal sealed partial class FluentWindow : Window
         mainArea.Height = double.NaN;
         if (Math.Abs(mainArea.MinHeight - viewportHeight) > .5)
             mainArea.MinHeight = viewportHeight;
-        C<ColumnDefinition>("SidebarColumn").Width = new GridLength(compact ? 80 : 248);
         foreach (var n in new[] { "BrandLabel", "ProfilesCaption", "NewProfileText", "ProfileSuggestionsText", "SettingsText" })
             C<FrameworkElement>(n).Visibility = compact ? Visibility.Collapsed : Visibility.Visible;
         foreach (var name in new[] { "ProfileSuggestionsButton", "SettingsButton" })
             C<Button>(name).HorizontalContentAlignment = compact ? HorizontalAlignment.Center : HorizontalAlignment.Left;
+        C<StackPanel>("SidebarCommands").Width = compact ? 44 : 212;
         foreach (ListViewItem item in C<ListView>("ProfileList").Items)
         {
             item.MinWidth = 0;
@@ -417,20 +421,6 @@ internal sealed partial class FluentWindow : Window
     async Task Message(string text, string title = "FlowVPN")
     {
         await Dialog(title, new TextBlock { Text = text, TextWrapping = TextWrapping.Wrap, MaxWidth = 500 }, "Понятно", false);
-    }
-    async Task NewProfile()
-    {
-        string sourceId = PreferredProfileSource()?.Id ?? "";
-        var name = await Prompt("Новый профиль", "Название профиля");
-        if (string.IsNullOrWhiteSpace(name))
-            return;
-        var p = new VpnProfile { Name = name, SourceId = sourceId };
-        settings.Profiles.Add(p);
-        settings.SelectedProfileId = p.Id;
-        settings.ProfileOnboardingCompleted = true;
-        Store.Save(settings);
-        BindAll();
-        SelectPage(4);
     }
     MenuFlyout Menu(params (string Text, Func<Task> Action)[] actions)
     {

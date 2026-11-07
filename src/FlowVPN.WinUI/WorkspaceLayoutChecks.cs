@@ -29,8 +29,9 @@ internal sealed partial class FluentWindow
                     var pageBounds = VisualBounds(C<FrameworkElement>(destination.Element), root);
                     double expectedWidth = Math.Min(WorkspaceContentWidth, scroll.ViewportWidth);
                     if (Math.Abs(mainBounds.Width - expectedWidth) > 1 ||
-                        Math.Abs(mainBounds.Left + mainBounds.Width / 2 - scrollBounds.Left - scrollBounds.Width / 2) > 1)
-                        throw new InvalidOperationException("Workspace content is not capped and centered: " + destination.Element);
+                        Math.Abs(mainBounds.Left - scrollBounds.Left) > 1 ||
+                        Math.Abs(scrollBounds.Left - C<ColumnDefinition>("SidebarColumn").ActualWidth) > 1)
+                        throw new InvalidOperationException("Workspace content is not capped and adjacent to the sidebar: " + destination.Element);
                     if (Math.Abs(statusBounds.Left - mainBounds.Left - main.Padding.Left) > 1 ||
                         Math.Abs(mainBounds.Right - main.Padding.Right - statusBounds.Right) > 1 ||
                         Math.Abs(pageBounds.Left - statusBounds.Left) > 1 || Math.Abs(pageBounds.Right - statusBounds.Right) > 1)
@@ -40,7 +41,7 @@ internal sealed partial class FluentWindow
                     if (destination.Id is not 3 && C<FrameworkElement>(destination.Element) is Border { Child: ScrollViewer pageScroll }
                         && (pageScroll.ScrollableHeight > 1 || pageScroll.ExtentHeight > pageScroll.ViewportHeight + 1))
                         throw new InvalidOperationException("Page clips its content inside a nested scroll area: " + destination.Element);
-                    reports.Add(new { RequestedWidth = width, Page = destination.Element, Viewport = scrollBounds, Content = mainBounds, Status = statusBounds });
+                    reports.Add(new { RequestedWidth = width, Page = destination.Element, SidebarWidth = C<ColumnDefinition>("SidebarColumn").ActualWidth, Viewport = scrollBounds, Content = mainBounds, Status = statusBounds });
                     if (width == 1600 && destination.Id is 4 or 6 or 9)
                         await CaptureElement(root, "workspace-" + destination.Element);
                 }

@@ -110,15 +110,7 @@ internal sealed partial class FluentWindow
         Hook("ProfileAppsButton", () => { SelectPage(0); return Task.CompletedTask; });
         Hook("DuplicateProfileButton", () => { if (Profile != null) DuplicateProfile(Profile); return Task.CompletedTask; });
         Hook("DeleteProfileButton", () => Profile == null ? Task.CompletedTask : DeleteProfile(Profile));
-        C<ComboBox>("ProfileSourceCombo").SelectionChanged += (_, _) =>
-        {
-            if (binding || Profile == null)
-                return;
-            Profile.SourceId = (C<ComboBox>("ProfileSourceCombo").SelectedItem as ComboBoxItem)?.Tag as string ?? "";
-            Save();
-            BindAll();
-            SelectPage(4);
-        };
+        C<ComboBox>("ProfileSourceCombo").SelectionChanged += (_, _) => ChangeProfileSource(C<ComboBox>("ProfileSourceCombo"));
         C<ComboBox>("ProfileModeCombo").SelectionChanged += (_, _) =>
         {
             if (binding || Profile == null)
@@ -132,14 +124,92 @@ internal sealed partial class FluentWindow
     {
         C<TextBlock>("IdentityName").Text = profile?.Name ?? "Создайте профиль";
         C<Border>("IdentityGlyph").Child = profile == null ? null : ProfileGlyph(profile, false);
-        var source = C<ComboBox>("ProfileSourceCombo");
-        source.Items.Clear();
-        foreach (var item in settings.Sources)
-            source.Items.Add(new ComboBoxItem { Content = item.Name + " · " + item.Kind, Tag = item.Id });
-        source.SelectedItem = source.Items.OfType<ComboBoxItem>().FirstOrDefault(i => (string)i.Tag == profile?.SourceId);
         C<ComboBox>("ProfileModeCombo").SelectedIndex = profile?.Mode == "all" ? 2 : profile?.Mode == "exclude" ? 1 : 0;
         foreach (string name in new[] { "EditIdentityButton", "ProfileSitesButton", "ProfileAppsButton", "DuplicateProfileButton", "DeleteProfileButton" })
             C<Button>(name).IsEnabled = profile != null;
         C<TextBlock>("ProfileSitesLabel").Text = "Сайты через VPN" + (profile?.Domains.Count > 0 ? " · " + profile.Domains.Count : "");
+    }
+
+    void RefreshProfileSourceOptions()
+    {
+        foreach (string name in new[] { "SourceCombo", "ProfileSourceCombo" })
+        {
+            var combo = C<ComboBox>(name);
+            bool sameCatalog = combo.Items.Count == settings.Sources.Count;
+            for (int index = 0; sameCatalog && index < settings.Sources.Count; index++)
+                sameCatalog = combo.Items[index] is ComboBoxItem { Tag: string id } && id == settings.Sources[index].Id;
+            if (!sameCatalog)
+            {
+                // Only an explicit catalog change recreates containers. Never reset an open
+                // selector's collection while WinUI is committing a selected item.
+                combo.IsDropDownOpen = false;
+                combo.Items.Clear();
+                foreach (var source in settings.Sources)
+                    combo.Items.Add(new ComboBoxItem { Tag = source.Id });
+            }
+            for (int index = 0; index < settings.Sources.Count; index++)
+            {
+                var source = settings.Sources[index];
+                var item = (ComboBoxItem)combo.Items[index];
+                string label = source.Name + " · " + ConnectionTypeLabel(source);
+                if (!Equals(item.Content, label)) item.Content = label;
+            }
+        }
+    }
+
+    void BindProfileSourceSelection(VpnProfile? profile)
+    {
+        bool previous = binding;
+        binding = true;
+        try
+        {
+            foreach (string name in new[] { "SourceCombo", "ProfileSourceCombo" })
+            {
+                var combo = C<ComboBox>(name);
+                var selected = combo.Items.OfType<ComboBoxItem>().FirstOrDefault(item => item.Tag is string id && id == profile?.SourceId);
+                if (!ReferenceEquals(combo.SelectedItem, selected)) combo.SelectedItem = selected;
+            }
+        }
+        finally { binding = previous; }
+    }
+
+    static void CommitProfileSource(VpnProfile profile, string sourceId, Action persist)
+    {
+        string previous = profile.SourceId;
+        profile.SourceId = sourceId;
+        try { persist(); }
+        catch { profile.SourceId = previous; throw; }
+    }
+
+    void ChangeProfileSource(ComboBox sender)
+    {
+        if (binding || windowClosed || Profile is not { } profile || sender.SelectedItem is not ComboBoxItem { Tag: string sourceId }
+            || profile.SourceId == sourceId || !settings.Sources.Any(source => source.Id == sourceId)) return;
+        Exception? saveError = null;
+        try { CommitProfileSource(profile, sourceId, () => Store.Save(settings)); }
+        catch (Exception error) { saveError = error; }
+        if (saveError != null)
+        {
+            // Roll back the control after the native selection callback has returned.
+            // Opening a dialog or resetting selection from inside that callback is avoidable reentrancy.
+            DispatcherQueue.TryEnqueue(async () =>
+            {
+                if (windowClosed) return;
+                BindProfileSourceSelection(Profile);
+                await Message(saveError.Message, "Не удалось сохранить подключение");
+            });
+            return;
+        }
+        BindProfileSourceSelection(profile);
+        RefreshProfileSourceLabel(profile);
+        Pending(); // Updates connection commands and the existing tray items without rebuilding either list.
+    }
+
+    void RefreshProfileSourceLabel(VpnProfile profile)
+    {
+        string kind = settings.Sources.FirstOrDefault(source => source.Id == profile.SourceId)?.Kind ?? "Нет подключения";
+        if (profileSourceLabels.TryGetValue(profile.Id, out var label)) label.Text = kind;
+        var item = C<ListView>("ProfileList").Items.OfType<ListViewItem>().FirstOrDefault(candidate => ReferenceEquals(candidate.Tag, profile));
+        if (item != null) ToolTipService.SetToolTip(item, profile.Name + " · " + kind);
     }
 }
