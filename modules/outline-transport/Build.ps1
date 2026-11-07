@@ -7,7 +7,7 @@ param(
 )
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
-$GoExe = (Get-Command -Name $GoExe -CommandType Application -ErrorAction Stop).Source
+$GoExe = (Get-Command -Name $GoExe -CommandType Application -ErrorAction Stop | Select-Object -First 1).Source
 $callerDirectory = $PWD.Path
 $repoRoot = (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot '../..')).Path
 if (-not $OutputDirectory) { $OutputDirectory = Join-Path $repoRoot 'work/outline-artifacts' }

@@ -24,7 +24,6 @@ jobs:
       GOWORK: 'off'
       GOPROXY: https://proxy.golang.org
       GOSUMDB: sum.golang.org
-      GOBIN: ${{ runner.temp }}/go-audit-tools
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -36,12 +35,16 @@ jobs:
           cache-dependency-path: modules/outline-transport/go.sum
       - name: Установить закреплённый анализатор Go
         shell: pwsh
+        env:
+          GOBIN: ${{ runner.temp }}/go-audit-tools
         run: |
           go install golang.org/x/vuln/cmd/govulncheck@v1.9.0
           if ($LASTEXITCODE -ne 0) { throw 'Не удалось получить закреплённый govulncheck; аудит не выполнен.' }
       - name: Проверить все закреплённые Go-модули
         shell: pwsh
         working-directory: modules/outline-transport
+        env:
+          GOBIN: ${{ runner.temp }}/go-audit-tools
         run: |
           go mod download
           if ($LASTEXITCODE -ne 0) { throw 'Не удалось получить закреплённые Go-зависимости.' }
