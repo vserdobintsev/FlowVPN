@@ -23,7 +23,7 @@
     <ApplicationManifest>app.manifest</ApplicationManifest>
     <ApplicationIcon>Assets/FlowVPN.ico</ApplicationIcon>
     <DefineConstants>$(DefineConstants);DISABLE_XAML_GENERATED_MAIN</DefineConstants>
-    <Version>1.4.3</Version>
+    <Version>1.5.0</Version>
     <FlowVPNPackageMode>Portable</FlowVPNPackageMode>
     <Authors>Владислав Сердобинцев</Authors>
     <PackageLicenseExpression>GPL-3.0-only</PackageLicenseExpression>
@@ -59,8 +59,11 @@
     <Content Include="Assets/FlowVPN.ico" Link="FlowVPN.ico" CopyToOutputDirectory="PreserveNewest" />
     <Content Include="UpdateChannels.json" CopyToOutputDirectory="PreserveNewest" />
     <EmbeddedResource Include="engine.lock.json" />
+    <EmbeddedResource Include="modules.lock.json" />
     <Content Include="LICENSE" Link="licenses/FlowVPN.txt" CopyToOutputDirectory="PreserveNewest" />
     <Content Include="THIRD-PARTY-NOTICES.md" Link="licenses/THIRD-PARTY-NOTICES.md" CopyToOutputDirectory="PreserveNewest" />
+    <Content Include="../../modules/outline-transport/THIRD-PARTY-NOTICES.md" Link="licenses/outline-transport/THIRD-PARTY-NOTICES.md" CopyToOutputDirectory="PreserveNewest" />
+    <Content Include="../../modules/outline-transport/licenses/*.txt" Link="licenses/outline-transport/licenses/%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
     <ApplicationDefinition Include="App.xaml" />
     <FrameworkReference Include="Microsoft.WindowsDesktop.App.WindowsForms" />
     <PackageReference Include="Microsoft.WindowsAppSDK" Version="2.6.5" />

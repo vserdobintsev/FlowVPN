@@ -38,7 +38,8 @@ internal sealed partial class FluentWindow
         {
             SelectionMode = ListViewSelectionMode.None,
             HorizontalContentAlignment = HorizontalAlignment.Stretch,
-            Height = Math.Clamp(root.ActualHeight - 370, 190, 390)
+            MaxHeight = 390,
+            VerticalAlignment = VerticalAlignment.Top
         };
         var count = new TextBlock { FontSize = 12, Opacity = .7 };
         var note = new TextBlock { TextWrapping = TextWrapping.Wrap, FontSize = 12, Opacity = .7 };
@@ -58,12 +59,20 @@ internal sealed partial class FluentWindow
         navigation.Children.Add(back);
         Grid.SetColumn(breadcrumb, 1);
         navigation.Children.Add(breadcrumb);
-        var panel = new StackPanel { Width = Math.Min(480, Math.Max(320, root.ActualWidth - 120)), Spacing = 12 };
-        panel.Children.Add(query);
-        panel.Children.Add(filter);
-        panel.Children.Add(navigation);
-        panel.Children.Add(note);
+        var panel = new Grid { Width = Math.Min(480, Math.Max(320, root.ActualWidth - 120)), RowSpacing = 12,
+            MaxHeight = Math.Max(240, root.ActualHeight - 280) };
+        panel.RowDefinitions.Add(new() { Height = GridLength.Auto });
+        panel.RowDefinitions.Add(new() { Height = new GridLength(1, GridUnitType.Star) });
+        panel.RowDefinitions.Add(new() { Height = GridLength.Auto });
+        var header = new StackPanel { Spacing = 12 };
+        header.Children.Add(query);
+        header.Children.Add(filter);
+        header.Children.Add(navigation);
+        header.Children.Add(note);
+        panel.Children.Add(header);
+        Grid.SetRow(list, 1);
         panel.Children.Add(list);
+        Grid.SetRow(count, 2);
         panel.Children.Add(count);
         var dialog = new ContentDialog
         {
@@ -78,6 +87,9 @@ internal sealed partial class FluentWindow
         };
         var applicationChecks = new Dictionary<string, CheckBox>();
         using var cancel = new CancellationTokenSource();
+        // Reserve room for the native title, actions and window margins. The star
+        // row yields space to the search controls and selection count first.
+        void ResizePicker(object sender, SizeChangedEventArgs args) => panel.MaxHeight = Math.Max(240, root.ActualHeight - 280);
         CancellationTokenSource? iconBatch = null;
         var imageRows = new Dictionary<string, Image>();
         var rowMetrics = new List<(string Name, FrameworkElement Title, FrameworkElement Icon)>();
@@ -99,7 +111,6 @@ internal sealed partial class FluentWindow
             filter.Visibility = nested ? Visibility.Collapsed : Visibility.Visible;
             note.Visibility = nested && small ? Visibility.Collapsed : Visibility.Visible;
             breadcrumb.Text = "Готовые наборы  ›  " + browser.Parent?.Name;
-            list.Height = Math.Clamp(root.ActualHeight - (nested ? (small ? 300 : 376) : 380), 150, 390);
             note.Text = filter.SelectedIndex == 0
                 ? nested ? "Выбирайте основное приложение и расширения независимо. Раскройте карточку для выбора компонентов."
                     : "Откройте приложение с расширениями или выберите отдельный набор. Добавляются только найденные компоненты."
@@ -235,6 +246,42 @@ internal sealed partial class FluentWindow
                 checkbox.Unchecked += (_, _) => SelectApplication();
                 object presentation = app.PresetId.Length > 0 ? new Expander { Header = heading, Content = components, IsEnabled = installed, HorizontalAlignment = HorizontalAlignment.Stretch, HorizontalContentAlignment = HorizontalAlignment.Stretch } : new Border { Child = heading, Padding = new Thickness(16, 0, 16, 0) };
                 var item = new ListViewItem { Content = presentation, Tag = app, HorizontalContentAlignment = HorizontalAlignment.Stretch, MinWidth = 0, Padding = new Thickness(0), Margin = new Thickness(0, 3, 0, 3) };
+                if (presentation is Expander details && components.Children.FirstOrDefault() is FrameworkElement firstComponent)
+                {
+                    bool revealPending = false, revealQueued = false;
+                    void RevealFirstComponent()
+                    {
+                        if (!revealPending || revealQueued) return;
+                        revealQueued = true;
+                        DispatcherQueue.TryEnqueue(Microsoft.UI.Dispatching.DispatcherQueuePriority.Low, () =>
+                        {
+                            try
+                            {
+                                if (cancel.IsCancellationRequested || windowClosed || !details.IsExpanded || !list.Items.Contains(item)) { revealPending = false; return; }
+                                list.UpdateLayout();
+                                if (!firstComponent.IsLoaded || firstComponent.ActualHeight <= 0) return;
+                                // Let the list scroll its own item after expansion changes its extent.
+                                // Leading keeps the application's header with its first component;
+                                // a single request never fights later user scrolling.
+                                revealPending = false;
+                                list.ScrollIntoView(item, ScrollIntoViewAlignment.Leading);
+                            }
+                            finally { revealQueued = false; }
+                        });
+                    }
+                    details.RegisterPropertyChangedCallback(Expander.IsExpandedProperty, (_, _) =>
+                    {
+                        revealPending = details.IsExpanded;
+                        RevealFirstComponent();
+                    });
+                    firstComponent.Loaded += (_, _) => RevealFirstComponent();
+                    firstComponent.SizeChanged += (_, _) => RevealFirstComponent();
+                    details.SizeChanged += (_, _) => RevealFirstComponent();
+                    details.Unloaded += (_, _) =>
+                    {
+                        revealPending = false;
+                    };
+                }
                 ToolTipService.SetToolTip(item, app.PresetId.Length > 0 ? app.Origin + "\n" + string.Join("\n", app.Rules.Select(r => r.Name + ": " + r.Path)) : app.Path);
                 list.Items.Add(item);
             }
@@ -309,8 +356,6 @@ internal sealed partial class FluentWindow
                 browser.Enter("vscode");
                 query.Text = "";
                 Fill();
-                if (list.Items.OfType<ListViewItem>().FirstOrDefault(i => ((CatalogApp)i.Tag).PresetId == "codex-vscode")?.Content is Expander expander)
-                    expander.IsExpanded = true;
             }
             if (visualDialogName == "application-extensions")
             {
@@ -324,7 +369,28 @@ internal sealed partial class FluentWindow
         {
             try
             {
+                if (visualDialogName?.StartsWith("preset-components") == true &&
+                    list.Items.OfType<ListViewItem>().FirstOrDefault(i => ((CatalogApp)i.Tag).PresetId == "codex-vscode")?.Content is Expander expander)
+                {
+                    expander.IsExpanded = true;
+                    var first = ((StackPanel)expander.Content).Children.OfType<FrameworkElement>().First();
+                    var wait = System.Diagnostics.Stopwatch.StartNew();
+                    while (!first.IsLoaded || first.ActualHeight <= 0)
+                    {
+                        if (wait.Elapsed > TimeSpan.FromSeconds(3)) throw new InvalidOperationException("Expanded preset component was not measured");
+                        await Task.Delay(25);
+                        list.UpdateLayout();
+                    }
+                }
                 await Task.Delay(450);
+                DependencyObject? countAncestor = count;
+                while ((countAncestor = Microsoft.UI.Xaml.Media.VisualTreeHelper.GetParent(countAncestor)) != null)
+                    if (countAncestor is ScrollViewer viewport)
+                    {
+                        var bounds = VisualBounds(count, viewport);
+                        if (bounds.Top < -1 || bounds.Bottom > viewport.ViewportHeight + 1)
+                            throw new InvalidOperationException("Application selection count is clipped by the dialog viewport");
+                    }
                 var positions = rowMetrics.Where(r => r.Title.ActualWidth > 0).Select(r => new
                 {
                     r.Name,
@@ -334,12 +400,34 @@ internal sealed partial class FluentWindow
                 if (positions.Length > 1 && (positions.Max(p => p.TitleX) - positions.Min(p => p.TitleX) > 2 || positions.Max(p => p.IconX) - positions.Min(p => p.IconX) > 2))
                     throw new Exception("Catalogue row columns do not align");
                 File.WriteAllText(Path.Combine(Store.Root, "design-preview", (visualDialogName ?? "picker") + "-columns.json"), System.Text.Json.JsonSerializer.Serialize(positions, Store.JsonOptions));
+                if (visualDialogName?.StartsWith("preset-components") == true &&
+                    list.Items.OfType<ListViewItem>().Select(i => i.Content).OfType<Expander>().FirstOrDefault(e => e.IsExpanded)?.Content is StackPanel components &&
+                    components.Children.FirstOrDefault() is FrameworkElement firstComponent)
+                {
+                    var viewports = new List<ScrollViewer>();
+                    DependencyObject? ancestor = firstComponent;
+                    while ((ancestor = Microsoft.UI.Xaml.Media.VisualTreeHelper.GetParent(ancestor)) != null)
+                        if (ancestor is ScrollViewer viewport) viewports.Add(viewport);
+                    var geometry = viewports.Select(viewport =>
+                    {
+                        var bounds = VisualBounds(firstComponent, viewport);
+                        return new { bounds.Top, bounds.Bottom, viewport.ViewportHeight, viewport.ExtentHeight, viewport.VerticalOffset, viewport.ScrollableHeight };
+                    }).ToArray();
+                    File.WriteAllText(Path.Combine(Store.Root, "design-preview", visualDialogName + "-viewport.json"), System.Text.Json.JsonSerializer.Serialize(new
+                    {
+                        firstComponent.IsLoaded, firstComponent.ActualHeight, Viewports = geometry, ListHeight = list.ActualHeight, PanelHeight = panel.ActualHeight
+                    }, Store.JsonOptions));
+                    if (!firstComponent.IsLoaded || firstComponent.ActualHeight <= 0 || geometry.Length == 0 ||
+                        geometry.Any(bounds => bounds.Top < -1 || bounds.Bottom > bounds.ViewportHeight + 1))
+                        throw new InvalidOperationException("Expanded preset's first component remains outside the list viewport");
+                }
             }
             catch (Exception e) { visualDialogError = e; }
         };
         ReviewDialog(dialog);
         dialog.Opened += (_, _) => query.Focus(FocusState.Programmatic);
         dialogOpen = true;
+        root.SizeChanged += ResizePicker;
         try
         {
             if (await dialog.ShowAsync() == ContentDialogResult.Primary)
@@ -353,7 +441,11 @@ internal sealed partial class FluentWindow
                 BindProfile();
             }
         }
-        finally { motion.Stop(list); dialogOpen = false; cancel.Cancel(); iconBatch?.Cancel(); iconBatch?.Dispose(); }
+        finally
+        {
+            motion.Stop(list); dialogOpen = false; cancel.Cancel(); iconBatch?.Cancel(); iconBatch?.Dispose();
+            root.SizeChanged -= ResizePicker;
+        }
     }
     async Task LoadCatalogIcons(KeyValuePair<string, Image>[] images, List<CatalogApp> apps, CancellationToken token)
     {

@@ -34,9 +34,18 @@ public static class CoreCli
 {
     public static Task<string> Run(params string[] args) => Run(CancellationToken.None, args);
 
-    public static async Task<string> Run(CancellationToken token, params string[] args)
+    public static Task<string> Run(CancellationToken token, params string[] args) => RunCore(token, null, args);
+
+    public static Task<string> Check(JsonObject configuration, CancellationToken token = default) => RunCore(token, configuration, "check", "-c", "stdin");
+
+    static async Task<string> RunCore(CancellationToken token, JsonObject? configuration, params string[] args)
     {
-        var info = new ProcessStartInfo { UseShellExecute = false, CreateNoWindow = true, RedirectStandardOutput = true, RedirectStandardError = true };
+        var info = new ProcessStartInfo
+        {
+            UseShellExecute = false, CreateNoWindow = true, RedirectStandardInput = configuration != null,
+            StandardInputEncoding = configuration == null ? null : new System.Text.UTF8Encoding(false),
+            RedirectStandardOutput = true, RedirectStandardError = true
+        };
         info.ArgumentList.Add("--disable-color");
         foreach (var a in args)
             info.ArgumentList.Add(a);
@@ -48,6 +57,13 @@ public static class CoreCli
         deadline.CancelAfter(TimeSpan.FromSeconds(25));
         try
         {
+            if (configuration != null)
+            {
+                // Serialize directly to the inherited pipe: connection secrets never need a temporary JSON file.
+                await System.Text.Json.JsonSerializer.SerializeAsync(process.StandardInput.BaseStream, configuration, Store.JsonOptions, deadline.Token).ConfigureAwait(false);
+                await process.StandardInput.BaseStream.FlushAsync(deadline.Token).ConfigureAwait(false);
+                process.StandardInput.Close();
+            }
             await process.WaitForExitAsync(deadline.Token).ConfigureAwait(false);
             token.ThrowIfCancellationRequested();
         }
@@ -100,13 +116,13 @@ public static class RuleRepository
         var m = Metadata();
         return !File.Exists(Path.Combine(Store.Rules, "ru-blocked.srs")) || m == null || !DateTimeOffset.TryParse(m["fetched"]?.ToString(), out var date) || DateTimeOffset.UtcNow - date > TimeSpan.FromHours(6);
     }
-    internal static async Task<bool> ValidCache(JsonObject metadata)
+    internal static async Task<bool> ValidCache(JsonObject metadata, CancellationToken token = default)
     {
         try
         {
             await using var file = new FileStream(Path.Combine(Store.Rules, "ru-blocked.srs"), FileMode.Open, FileAccess.Read, FileShare.Read, 65536, true);
             return file.Length is > 0 and <= 16 * 1024 * 1024 &&
-                Convert.ToHexString(await SHA256.HashDataAsync(file)).Equals(metadata["sha256"]?.ToString(), StringComparison.OrdinalIgnoreCase);
+                Convert.ToHexString(await SHA256.HashDataAsync(file, token)).Equals(metadata["sha256"]?.ToString(), StringComparison.OrdinalIgnoreCase);
         }
         catch (IOException) { return false; }
     }
@@ -145,34 +161,39 @@ public static class RuleRepository
             cidrs.Add(text);
         }
     }
-    public static async Task<bool> Update(HttpClient client)
+    public static async Task<bool> Update(HttpClient client, CancellationToken cancellationToken = default, IProgress<TransferProgress>? progress = null)
     {
-        using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(45));
+        using var deadline = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        deadline.CancelAfter(TimeSpan.FromSeconds(45));
         var token = deadline.Token;
         if (!client.DefaultRequestHeaders.UserAgent.Any())
             client.DefaultRequestHeaders.UserAgent.ParseAdd("FlowVPN/1.4");
-        var commit = JsonNode.Parse(await BoundedHttp.Download(client, Api, 1024 * 1024, token));
+        var commit = JsonNode.Parse(await BoundedHttp.Download(client, Api, 1024 * 1024, token, progress, "Версия IP-базы"));
         string revision = commit?["sha"]?.ToString() ?? throw new Exception("GitHub не вернул ревизию списка.");
         if (!System.Text.RegularExpressions.Regex.IsMatch(revision, @"\A[0-9a-f]{40}\z"))
             throw new Exception("Некорректная ревизия GitHub.");
         var metadata = Metadata();
-        if (metadata?["revision"]?.ToString() == revision && await ValidCache(metadata))
+        progress?.Report(new("IP-база", TransferStage.Verifying));
+        if (metadata?["revision"]?.ToString() == revision && await ValidCache(metadata, token))
         {
             metadata["fetched"] = DateTimeOffset.UtcNow.ToString("O");
             Store.WriteJson(MetaPath, metadata);
             return false;
         }
         string url = $"https://raw.githubusercontent.com/runetfreedom/russia-blocked-geoip/{revision}/srs/ru-blocked.srs";
-        var data = await BoundedHttp.Download(client, url, 16 * 1024 * 1024, token);
+        var data = await BoundedHttp.Download(client, url, 16 * 1024 * 1024, token, progress, "IP-база");
+        progress?.Report(new("IP-база", TransferStage.Verifying));
         string candidate = Path.Combine(Store.Run, "geoip-" + Guid.NewGuid().ToString("N") + ".srs"), decoded = candidate + ".json";
         try
         {
-            await File.WriteAllBytesAsync(candidate, data);
+            await File.WriteAllBytesAsync(candidate, data, token);
             await CoreCli.Run(token, "rule-set", "decompile", candidate, "-o", decoded);
-            var parsed = JsonNode.Parse(await File.ReadAllTextAsync(decoded));
+            var parsed = JsonNode.Parse(await File.ReadAllTextAsync(decoded, token));
             if (parsed is not JsonObject root || root.Any(p => p.Key is not ("version" or "rules")) || root["rules"] is not JsonArray array)
                 throw new Exception("Получен пустой список.");
             _ = ParseIpRules(array, token);
+            token.ThrowIfCancellationRequested();
+            progress?.Report(new("IP-база", TransferStage.Applying));
             Store.Atomic(Path.Combine(Store.Rules, "ru-blocked.srs"), data);
             Store.WriteJson(MetaPath, new JsonObject { ["repository"] = Repository, ["url"] = url, ["revision"] = revision, ["fetched"] = DateTimeOffset.UtcNow.ToString("O"), ["bytes"] = data.Length, ["sha256"] = Convert.ToHexString(SHA256.HashData(data)) });
             return true;
@@ -184,6 +205,7 @@ public sealed class VpnEngine : IDisposable
 {
     public IWebProxy? Proxy { get; private set; }
     public CoreSnapshot? Snapshot { get; private set; }
+    public CoreTrafficSnapshot? Traffic { get; private set; }
     public string ControlError { get; private set; } = "";
     public VpnHealth Health { get; private set; } = VpnHealth.Stopped;
     public bool Healthy => Running && Health == VpnHealth.Online;
@@ -194,7 +216,9 @@ public sealed class VpnEngine : IDisposable
     public string? ActiveProfileId { get; private set; }
     public int ProxyPort { get; private set; }
     public event Action? Changed;
+    public event Action? TrafficChanged;
     BrokerClient? broker;
+    ModuleProcess? transportModule;
     CancellationTokenSource? session;
     readonly CancellationTokenSource lifetime = new();
     readonly SemaphoreSlim gate = new(1, 1), logGate = new(1, 1);
@@ -216,7 +240,7 @@ public sealed class VpnEngine : IDisposable
         return BoundedHttp.Client(TimeSpan.FromSeconds(35), Proxy);
     }
 
-    public async Task Connect(Settings settings, VpnProfile profile)
+    public async Task Connect(Settings settings, VpnProfile profile, Func<string, CancellationToken, Task<bool>>? prepareModule = null)
     {
         settings = System.Text.Json.JsonSerializer.Deserialize<Settings>(System.Text.Json.JsonSerializer.Serialize(settings))!;
         profile = System.Text.Json.JsonSerializer.Deserialize<VpnProfile>(System.Text.Json.JsonSerializer.Serialize(profile))!;
@@ -251,12 +275,29 @@ public sealed class VpnEngine : IDisposable
                 Set("Обновление динамического ключа Outline…");
                 var updated = await Importers.DynamicOutline(selected.DynamicKey, token);
                 selected.ConnectionJson = updated.ConnectionJson;
+                selected.Transport = updated.Transport;
             }
-            var plan = await BrokerPlanBuilder.Create(settings, profile, token);
+            if (ModuleTransport.RequiredModule(selected) is not null)
+            {
+                Set("Подготовка модуля Outline…");
+                if (prepareModule != null && !await prepareModule(ModuleTransport.OutlineCapability, token))
+                {
+                    await StopInternal();
+                    return;
+                }
+                token.ThrowIfCancellationRequested();
+                transportModule = await ModuleProcess.StartAsync(selected, token);
+            }
+            var plan = await BrokerPlanBuilder.Create(settings, profile, token, transportModule?.Transport);
             token.ThrowIfCancellationRequested();
             Directory.CreateDirectory(Store.ProfileLogs(profile.Id));
             var current = new BrokerClient();
             broker = current;
+            if (transportModule is { } module)
+            {
+                if (module.HasExited) throw new InvalidOperationException("Модуль Outline завершился до подключения.");
+                _ = WatchModule(current, module, token);
+            }
             if (Volatile.Read(ref disposed) != 0) { current.Dispose(); token.ThrowIfCancellationRequested(); }
             Set("Подтвердите разрешение Windows для VPN…");
             var state = await current.Start(plan, token);
@@ -274,6 +315,7 @@ public sealed class VpnEngine : IDisposable
             await ApplyState(state, profile.Id, token);
             // Poll while probing too: the broker must keep receiving liveness requests.
             _ = WatchState(current, profile.Id, token);
+            _ = WatchTraffic(current, token);
             Set("Проверка VPN-соединения…");
             using var client = Client();
             string? ip = null;
@@ -361,6 +403,37 @@ public sealed class VpnEngine : IDisposable
                 await EndSession(current, "Связь с процессом VPN потеряна: " + error.Message);
             }
         }
+    }
+
+    async Task WatchTraffic(BrokerClient current, CancellationToken token)
+    {
+        try
+        {
+            while (!token.IsCancellationRequested && ReferenceEquals(broker, current))
+            {
+                try
+                {
+                    var sample = await current.Traffic(token).ConfigureAwait(false);
+                    if (token.IsCancellationRequested || !ReferenceEquals(broker, current)) return;
+                    Traffic = sample;
+                    TrafficChanged?.Invoke();
+                }
+                catch (OperationCanceledException) when (token.IsCancellationRequested) { return; }
+                catch (Exception error) when (error is IOException or InvalidDataException or InvalidOperationException or System.Text.Json.JsonException or OperationCanceledException)
+                {
+                    if (token.IsCancellationRequested || !ReferenceEquals(broker, current)) return;
+                    // Telemetry is optional. Health/lifecycle monitoring owns connection failures.
+                    if (Traffic is { } old)
+                    {
+                        Traffic = old with { HasSample = false, SampleAgeMilliseconds = long.MaxValue };
+                        TrafficChanged?.Invoke();
+                    }
+                    if (current.IsClosed) return;
+                }
+                await Task.Delay(TimeSpan.FromSeconds(1), token).ConfigureAwait(false);
+            }
+        }
+        catch (OperationCanceledException) when (token.IsCancellationRequested) { }
     }
 
     async Task EndSession(BrokerClient current, string status)
@@ -451,6 +524,14 @@ public sealed class VpnEngine : IDisposable
             catch (Exception error) when (old.ExitConfirmed && error is (IOException or InvalidOperationException or OperationCanceledException or System.Text.Json.JsonException)) { }
             Interlocked.CompareExchange(ref broker, null, old);
         }
+        var module = transportModule;
+        if (module != null)
+        {
+            stopping = true;
+            Busy = true;
+            await module.DisposeAsync();
+            Interlocked.CompareExchange(ref transportModule, null, module);
+        }
         stopping = false;
         session?.Dispose();
         session = null;
@@ -460,6 +541,8 @@ public sealed class VpnEngine : IDisposable
         Proxy = null;
         ProxyPort = 0;
         Snapshot = null;
+        Traffic = null;
+        TrafficChanged?.Invoke();
         Health = VpnHealth.Stopped;
         ControlError = "";
         Set("Отключено");
@@ -483,8 +566,21 @@ public sealed class VpnEngine : IDisposable
         lifetime.Cancel();
         CancelSession();
         Interlocked.Exchange(ref broker, null)?.Dispose();
+        Interlocked.Exchange(ref transportModule, null)?.Dispose();
         running = false;
         Proxy = null;
         Snapshot = null;
+        Traffic = null;
+    }
+
+    async Task WatchModule(BrokerClient current, ModuleProcess module, CancellationToken token)
+    {
+        try
+        {
+            await module.WaitForExitAsync(token);
+            if (!token.IsCancellationRequested && ReferenceEquals(transportModule, module))
+                await EndSession(current, "Модуль Outline завершился. Подключение остановлено.");
+        }
+        catch (Exception error) when (error is OperationCanceledException or ObjectDisposedException or InvalidOperationException) { }
     }
 }

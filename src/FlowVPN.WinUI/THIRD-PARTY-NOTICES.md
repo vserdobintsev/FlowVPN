@@ -6,4 +6,6 @@
 
 Microsoft Windows App SDK, Windows SDK BuildTools, .NET и их зависимости сохраняют собственные условия лицензирования. Точные пакеты перечислены в packages.lock.json; лицензии доступны в метаданных каждого NuGet-пакета. Готовые сборки содержат файлы лицензий, поставляемые runtime-пакетами.
 
+Дополнительный модуль совместимости Outline собирается из `modules/outline-transport` этого репозитория и закреплённых Go-зависимостей. Он загружается отдельно; тексты лицензий и уведомления включены в MSIX в каталог `licenses/outline-transport`, а также сопровождают выпуск модуля. Версии компонентов и исходники перечислены в [уведомлениях модуля](../../modules/outline-transport/THIRD-PARTY-NOTICES.md).
+
 Источники общих правил: [RunetFreedom GeoIP](https://github.com/runetfreedom/russia-blocked-geoip), [RunetFreedom GeoSite](https://github.com/runetfreedom/russia-blocked-geosite). Сами списки загружаются приложением отдельно и не включены в архив исходников FlowVPN. До зеркалирования или распространения этих наборов нужно проверить их собственные условия и источники данных.

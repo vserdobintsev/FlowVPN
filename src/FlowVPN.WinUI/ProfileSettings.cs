@@ -103,6 +103,7 @@ internal sealed partial class FluentWindow
     }
     void HookProfileSettings()
     {
+        C<ScrollViewer>("ProfileSettingsScroll").SizeChanged += (_, _) => LayoutProfileSettings();
         Hook("EditIdentityButton", EditProfileIcon);
         Hook("ProfileSitesButton", EditDomains);
         Hook("ProfileReconnectButton", async () => { await Disconnect(); await Connect(); });
@@ -139,6 +140,6 @@ internal sealed partial class FluentWindow
         C<ComboBox>("ProfileModeCombo").SelectedIndex = profile?.Mode == "all" ? 2 : profile?.Mode == "exclude" ? 1 : 0;
         foreach (string name in new[] { "EditIdentityButton", "ProfileSitesButton", "ProfileAppsButton", "DuplicateProfileButton", "DeleteProfileButton" })
             C<Button>(name).IsEnabled = profile != null;
-        C<Button>("ProfileSitesButton").Content = CommandContent("\uE774", "Сайты через VPN" + (profile?.Domains.Count > 0 ? " · " + profile.Domains.Count : ""));
+        C<TextBlock>("ProfileSitesLabel").Text = "Сайты через VPN" + (profile?.Domains.Count > 0 ? " · " + profile.Domains.Count : "");
     }
 }

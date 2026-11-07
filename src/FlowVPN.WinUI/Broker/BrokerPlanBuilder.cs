@@ -9,19 +9,23 @@ internal static class BrokerPlanBuilder
     const int MaxSourceBytes = 32 * 1024 * 1024;
     const int MaxTerms = 2_000_000;
 
-    public static Task<BrokerPlan> Create(Settings settings, VpnProfile profile, CancellationToken token = default) =>
+    public static Task<BrokerPlan> Create(Settings settings, VpnProfile profile, CancellationToken token = default, BrokerLocalTransport? transport = null) =>
         // Parsing and normalizing the shared lists must not resume on the WinUI thread.
-        Task.Run(() => CreateCore(settings, profile, token), token);
+        Task.Run(() => CreateCore(settings, profile, token, transport), token);
 
-    static async Task<BrokerPlan> CreateCore(Settings settings, VpnProfile profile, CancellationToken token)
+    static async Task<BrokerPlan> CreateCore(Settings settings, VpnProfile profile, CancellationToken token, BrokerLocalTransport? transport)
     {
         token.ThrowIfCancellationRequested();
         var source = settings.Sources.FirstOrDefault(s => s.Id == profile.SourceId)
             ?? throw new InvalidOperationException("Выберите подключение.");
+        string? required = ModuleTransport.RequiredModule(source);
+        if (required != transport?.ModuleId)
+            throw new InvalidOperationException("Для проверки этого подключения требуется запущенный модуль Outline. Установите модуль и подключите профиль.");
         var plan = new BrokerPlan
         {
             Kind = source.Kind,
             ConnectionJson = source.ConnectionJson,
+            LocalTransport = transport,
             Mode = profile.Mode,
             ProcessPatterns = profile.Apps.Select(a => a.Pattern).Distinct(StringComparer.Ordinal).ToArray(),
             BaseEnabled = settings.BaseRulesEnabled
@@ -41,33 +45,37 @@ internal static class BrokerPlanBuilder
             }
             finally { File.Delete(candidate); File.Delete(decoded); }
 
-            var rules = await ReadRules(DomainRepository.RulePath(settings.BaseDomainCategory), token).ConfigureAwait(false);
-            var exact = new List<string>();
-            var suffix = new List<string>();
-            var keyword = new List<string>();
-            var regex = new List<string>();
-            foreach (var rule in rules)
+            var categories = BaseDomainSelection.From(settings).Categories;
+            if (categories.Count > 0)
             {
-                token.ThrowIfCancellationRequested();
-                if (rule is not JsonObject fields)
-                    throw new InvalidDataException("Некорректная локальная доменная база. Обновите её.");
-                foreach (var field in fields)
+                var rules = await ReadRules(DomainRepository.RulePath(categories), token).ConfigureAwait(false);
+                var exact = new List<string>();
+                var suffix = new List<string>();
+                var keyword = new List<string>();
+                var regex = new List<string>();
+                foreach (var rule in rules)
                 {
-                    var target = field.Key switch
+                    token.ThrowIfCancellationRequested();
+                    if (rule is not JsonObject fields)
+                        throw new InvalidDataException("Некорректная локальная доменная база. Обновите её.");
+                    foreach (var field in fields)
                     {
-                        "domain" => exact,
-                        "domain_suffix" => suffix,
-                        "domain_keyword" => keyword,
-                        "domain_regex" => regex,
-                        _ => throw new InvalidDataException("Неподдерживаемые правила в локальной доменной базе.")
-                    };
-                    if (field.Value is not JsonArray array)
-                        throw new InvalidDataException("Некорректный формат доменного правила.");
-                    Append(target, array, token);
+                        var target = field.Key switch
+                        {
+                            "domain" => exact,
+                            "domain_suffix" => suffix,
+                            "domain_keyword" => keyword,
+                            "domain_regex" => regex,
+                            _ => throw new InvalidDataException("Неподдерживаемые правила в локальной доменной базе.")
+                        };
+                        if (field.Value is not JsonArray array)
+                            throw new InvalidDataException("Некорректный формат доменного правила.");
+                        Append(target, array, token);
+                    }
                 }
+                plan.BaseDomains = new() { Domain = exact.Distinct(StringComparer.Ordinal).ToArray(), Suffix = suffix.Distinct(StringComparer.Ordinal).ToArray(), Keyword = keyword.Distinct(StringComparer.Ordinal).ToArray(), Regex = regex.Distinct(StringComparer.Ordinal).ToArray() };
+                coverage = DomainCoverage.FromRuleSet(new JsonObject { ["rules"] = rules }, token);
             }
-            plan.BaseDomains = new() { Domain = exact.ToArray(), Suffix = suffix.ToArray(), Keyword = keyword.ToArray(), Regex = regex.ToArray() };
-            coverage = DomainCoverage.FromRuleSet(new JsonObject { ["rules"] = rules }, token);
         }
         plan.Domains = DomainCoverage.Effective(profile.Domains, coverage, token).ToArray();
         token.ThrowIfCancellationRequested();

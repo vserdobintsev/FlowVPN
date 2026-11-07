@@ -79,6 +79,7 @@ internal static class BrokerHost
         {
             "start" => !alreadyStarted && request.Plan != null && request.ConnectionId == null,
             "status" or "stop" => request.Plan == null && request.ConnectionId == null,
+            "traffic" => alreadyStarted && request.Plan == null && request.ConnectionId == null,
             "close" => alreadyStarted && request.Plan == null && Guid.TryParse(request.ConnectionId, out _),
             _ => false
         };
@@ -115,7 +116,9 @@ internal static class BrokerHost
                         await session.Stop();
                         break;
                 }
-                reply = new() { Success = true, State = await session.State(operation.Token, request.Command == "start") };
+                reply = request.Command == "traffic"
+                    ? new() { Success = true, Traffic = session.Traffic() }
+                    : new() { Success = true, State = await session.State(operation.Token, request.Command == "start") };
             }
             catch (Exception e) when (e is not OperationCanceledException)
             {
@@ -141,6 +144,7 @@ internal static class BrokerHost
         CoreIntegrity? core;
         CoreJob? job;
         CoreControl? control;
+        CoreTrafficMonitor? traffic;
         ProxyAccess? proxy;
         Task[] readers = [];
         int proxyPort;
@@ -196,6 +200,7 @@ internal static class BrokerHost
             job = new CoreJob(core.Process);
             readers = [logs.Capture(core.Process.StandardOutput), logs.Capture(core.Process.StandardError)];
             await WriteConfiguration(core.Process, configuration, token);
+            traffic = new CoreTrafficMonitor(control);
         }
 
         static ProcessStartInfo StartInfo(string command, bool hiddenConsole)
@@ -240,13 +245,12 @@ internal static class BrokerHost
                 try
                 {
                     var snapshot = await control.Snapshot(token);
+                    traffic?.State.RecordTotals(snapshot);
                     // Bound reply size independently of the engine's HTTP response limit.
-                    state.Snapshot = snapshot with { Version = Short(snapshot.Version, 64), Connections = snapshot.Connections.Take(256).Select(c => c with
+                    state.Snapshot = snapshot with { Version = Short(snapshot.Version, 64), Connections = snapshot.Connections.Take(CoreControl.MaximumConnections).Select(c => c with
                     {
-                        Id = Guid.Parse(c.Id).ToString("D"), Host = Short(c.Host, 253), ProcessPath = Short(c.ProcessPath, 512), Route = Short(c.Route, 256)
+                        Id = Guid.Parse(c.Id).ToString("D"), Host = Short(c.Host, 253), ProcessPath = Short(c.ProcessPath, 512), Route = Short(c.Route, 256), DestinationIp = Short(c.DestinationIp, 64)
                     }).ToArray() };
-                    if (snapshot.Connections.Count > 256)
-                        state.ControlError = "Показаны первые 256 соединений.";
                 }
                 catch (OperationCanceledException) when (token.IsCancellationRequested) { throw; }
                 catch (Exception e) when (e is HttpRequestException or OperationCanceledException or System.Text.Json.JsonException or InvalidDataException or InvalidOperationException or FormatException)
@@ -260,10 +264,17 @@ internal static class BrokerHost
         public Task CloseConnection(string id, CancellationToken token) =>
             (control ?? throw new InvalidOperationException("Движок не запущен.")).CloseConnection(id, token);
 
+        public CoreTrafficSnapshot? Traffic() => traffic?.State.Snapshot();
+
         public async Task Stop()
         {
             try
             {
+                if (traffic != null)
+                {
+                    await traffic.DisposeAsync();
+                    traffic = null;
+                }
                 if (core != null && !core.Process.HasExited)
                 {
                     Task stopping = Native.Stop(core.Process);

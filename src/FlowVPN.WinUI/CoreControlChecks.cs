@@ -37,6 +37,7 @@ internal static class CoreControlChecks
         Process? process = null;
         CoreIntegrity? verifiedCore = null;
         CoreJob? job = null;
+        CoreTrafficMonitor? monitor = null;
         using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(20));
         try
         {
@@ -67,6 +68,12 @@ internal static class CoreControlChecks
             using var anonymous = new HttpClient(new HttpClientHandler { UseProxy = false });
             using var response = await anonymous.GetAsync($"http://127.0.0.1:{api.Port}/version", timeout.Token);
             Check(response.StatusCode == HttpStatusCode.Unauthorized, "Unauthenticated API requests are rejected");
+            using var anonymousTraffic = await anonymous.GetAsync($"http://127.0.0.1:{api.Port}/traffic", timeout.Token);
+            Check(anonymousTraffic.StatusCode == HttpStatusCode.Unauthorized, "Traffic streams require the same secret as other management endpoints");
+            monitor = new CoreTrafficMonitor(api);
+            while (!monitor.State.Snapshot().HasSample)
+                await Task.Delay(50, timeout.Token);
+            Check(monitor.State.Snapshot().Sequence > 0, "Bundled sing-box supplies a bounded one-second traffic stream without connection polling");
             using var unauthenticatedProxy = new TcpClient();
             await unauthenticatedProxy.ConnectAsync(IPAddress.Loopback, proxyPort, timeout.Token);
             await unauthenticatedProxy.GetStream().WriteAsync(new byte[] { 5, 1, 0 }, timeout.Token);
@@ -87,6 +94,9 @@ internal static class CoreControlChecks
                     await Task.Delay(100, timeout.Token);
             } while (snapshot.Connections.Count == 0);
             Check(snapshot.Connections.Count == 1, "API reports a real loopback-only proxied connection");
+            while (monitor.State.Snapshot() is not { HasSample: true, UploadedPerSecond: > 0, DownloadedPerSecond: > 0 })
+                await Task.Delay(50, timeout.Token);
+            Check(true, "Traffic stream counts both directions of a real direct-outbound loopback connection");
             await api.CloseConnection(snapshot.Connections[0].Id, timeout.Token);
             do
             {
@@ -102,6 +112,8 @@ internal static class CoreControlChecks
             catch (HttpRequestException) { interrupted = true; }
             catch (OperationCanceledException) { interrupted = true; }
             Check(interrupted && snapshot.Connections.Count == 0, "DELETE closes the selected real connection and updates the snapshot");
+            monitor.State.RecordTotals(snapshot);
+            Check(monitor.State.Snapshot() is { HasTotals: true, UploadedTotal: > 0, DownloadedTotal: > 0 }, "Authoritative session totals retain transferred bytes after the connection closes");
             bool rejected = false;
             try
             {
@@ -113,6 +125,7 @@ internal static class CoreControlChecks
         finally
         {
             target.Stop();
+            if (monitor != null) await monitor.DisposeAsync();
             job?.Dispose();
             if (process != null)
             {

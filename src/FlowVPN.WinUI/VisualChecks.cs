@@ -12,12 +12,12 @@ internal sealed partial class FluentWindow
 {
     string? visualDialogName;
     Exception? visualDialogError;
-    void ReviewDialog(ContentDialog dialog)
+    void ReviewDialog(ContentDialog dialog, Action? beforeCapture = null)
     {
         if (!Entry.VisualTest || visualDialogName == null)
             return;
         string name = visualDialogName;
-        dialog.Opened += async (_, _) => { try { await Task.Delay(700); await CaptureElement(dialog, name); } catch (Exception e) { visualDialogError = e; } finally { dialog.Hide(); } };
+        dialog.Opened += async (_, _) => { try { await Task.Delay(700); dialog.UpdateLayout(); beforeCapture?.Invoke(); await CaptureElement(dialog, name); } catch (Exception e) { visualDialogError = e; } finally { dialog.Hide(); } };
     }
     async Task CaptureElement(UIElement element, string name)
     {
@@ -39,11 +39,14 @@ internal sealed partial class FluentWindow
     [DllImport("user32.dll")] static extern uint GetDpiForWindow(IntPtr hwnd);
     async Task VisualChecks()
     {
-        await CheckMotion();
-        File.Delete(Path.Combine(Store.Data, "visual-error.txt"));
         var folder = Path.Combine(Store.Root, "design-preview");
         Directory.CreateDirectory(folder);
-        FeatureChecks.Run(detectedPresets);
+        await CheckMotion();
+        // Motion is checked separately. Layout captures must show the settled page,
+        // not a partially transparent frame of its entrance animation.
+        motion.TestEnabled = false;
+        File.Delete(Path.Combine(Store.Data, "visual-error.txt"));
+        await FeatureChecks.Run(detectedPresets);
         await UpdateChecks.Run();
         var reports = new List<object>();
         double scale = GetDpiForWindow(WinRT.Interop.WindowNative.GetWindowHandle(this)) / 96d;
@@ -83,6 +86,14 @@ internal sealed partial class FluentWindow
                     continue;
                 var point = element.TransformToVisual(C<Grid>("MainArea")).TransformPoint(new Windows.Foundation.Point());
                 bool inside = point.X >= -1 && point.Y >= -1 && point.X + element.ActualWidth <= C<Grid>("MainArea").ActualWidth + 1 && point.Y + element.ActualHeight <= C<Grid>("MainArea").ActualHeight + 1;
+                if (!inside && spec.Page == 0 && name is "AddApp" or "DomainsButton" or "RemoveApps")
+                {
+                    element.StartBringIntoView(new BringIntoViewOptions { AnimationDesired = false });
+                    await Task.Delay(100);
+                    root.UpdateLayout();
+                    point = element.TransformToVisual(C<Grid>("MainArea")).TransformPoint(new Windows.Foundation.Point());
+                    inside = point.X >= -1 && point.Y >= -1 && point.X + element.ActualWidth <= C<Grid>("MainArea").ActualWidth + 1 && point.Y + element.ActualHeight <= C<Grid>("MainArea").ActualHeight + 1;
+                }
                 measured.Add(new
                 {
                     Name = name,
@@ -104,6 +115,14 @@ internal sealed partial class FluentWindow
                 Controls = measured
             });
         }
+        await CheckOperationLayout(scale, folder);
+        await CheckWorkspaceLayout(scale, folder);
+        await CheckModuleCards(scale, folder);
+        await CheckDeveloperIdentityLayout(scale, folder);
+        await CheckSidebarNavigation(scale, folder);
+        await CheckProfileSettingsLayout(scale, folder);
+        await CheckEmptyApplicationsLayout(scale, folder);
+        await CheckSettingsContentLayout(scale, folder);
         SelectPage(5);
         if (C<Button>("CheckAppUpdateButton").IsEnabled || C<Button>("PrepareUpdateButton").IsEnabled)
             throw new Exception("Unconfigured preview exposed an update action");
@@ -143,16 +162,37 @@ internal sealed partial class FluentWindow
         File.WriteAllText(Path.Combine(folder, "group-checks.json"), JsonSerializer.Serialize(groups.Select(g => new { g.Name, Components = g.Rules.Count }), Store.JsonOptions));
         root.RequestedTheme = ElementTheme.Light;
         SelectPage(0);
-        foreach (ListViewItem item in C<ListView>("AppList").Items)
+        var expandedProfile = Profile ?? throw new InvalidOperationException("Expanded application fixture requires a profile");
+        var originalApplications = expandedProfile.Apps;
+        try
         {
-            if (item.Content is Expander expander)
-            {
-                expander.IsExpanded = true;
-                break;
-            }
+            expandedProfile.Apps = [
+                new AppRule { Name = "Основной компонент · визуальная проверка", Path = "visual-main.exe", Pattern = "^visual-main-fixture$", GroupId = "visual-expansion", GroupName = "Проверочная группа" },
+                new AppRule { Name = "Вспомогательный компонент · визуальная проверка", Path = "visual-engine.exe", Pattern = "^visual-engine-fixture$", GroupId = "visual-expansion", GroupName = "Проверочная группа", ComponentRole = "engine" }
+            ];
+            BindProfile();
+            var appList = C<ListView>("AppList");
+            var item = appList.Items.OfType<ListViewItem>().Single();
+            var expanded = (Expander)item.Content;
+            expanded.IsExpanded = true;
+            await Task.Delay(350);
+            var component = ((StackPanel)expanded.Content).Children.OfType<FrameworkElement>().First();
+            component.StartBringIntoView(new BringIntoViewOptions { AnimationDesired = false });
+            await Task.Delay(100);
+            root.UpdateLayout();
+            var inList = VisualBounds(component, appList);
+            var inWindow = VisualBounds(component, C<ScrollViewer>("MainScroll"));
+            if (!expanded.IsExpanded || inList.Top < -1 || inList.Bottom > appList.ActualHeight + 1 ||
+                inWindow.Top < -1 || inWindow.Bottom > C<ScrollViewer>("MainScroll").ViewportHeight + 1)
+                throw new InvalidOperationException("Expanded application component is clipped in the visual fixture");
+            await CaptureElement(root, "application-expanded");
         }
-        await Task.Delay(350);
-        await CaptureElement(root, "application-expanded");
+        finally
+        {
+            expandedProfile.Apps = originalApplications;
+            BindProfile();
+            C<ScrollViewer>("MainScroll").ChangeView(null, 0, null, true);
+        }
         SelectPage(1);
         if (C<FrameworkElement>("SectionNavigation").Visibility != Visibility.Collapsed || C<FrameworkElement>("ConnectionCard").Visibility != Visibility.Collapsed || C<ListView>("ProfileList").SelectedItem != null)
             throw new Exception("Settings scope is mixed with profile controls");
@@ -185,6 +225,7 @@ internal sealed partial class FluentWindow
         await ShowCoreConnections();
         visualDialogName = "domains";
         await EditDomains();
+        await CheckCategoryPicker();
         visualDialogName = "running-applications";
         await PickProcesses();
         root.RequestedTheme = ElementTheme.Dark;
@@ -198,8 +239,6 @@ internal sealed partial class FluentWindow
         await PickProcesses();
         AppWindow.Resize(new Windows.Graphics.SizeInt32((int)(1180 * scale), (int)(840 * scale)));
         visualDialogName = null;
-        if (visualDialogError != null)
-            throw visualDialogError;
         var trayMenu = tray.ContextMenuStrip!;
         File.WriteAllText(Path.Combine(folder, "taskbar-checks.json"), JsonSerializer.Serialize(new
         {
@@ -233,6 +272,8 @@ internal sealed partial class FluentWindow
             using var icon = TrayArt.Status(state).ToBitmap();
             icon.Save(Path.Combine(folder, "tray-" + state + ".png"), System.Drawing.Imaging.ImageFormat.Png);
         }
+        if (visualDialogError != null)
+            throw visualDialogError;
     }
 
     async Task CheckProfileActions(double scale, string folder)
@@ -265,7 +306,8 @@ internal sealed partial class FluentWindow
 
         await Focus(outside, FocusState.Pointer);
         await Focus(item, FocusState.Programmatic);
-        Check("automatic-focus-hidden", false);
+        // Programmatic focus retains WinUI's effective input modality; it is not a pointer-focus request.
+        Check("programmatic-focus-respects-input-mode", item.FocusState == FocusState.Keyboard);
         await CaptureElement(root, "profile-actions-programmatic");
         await Focus(item, FocusState.Keyboard);
         Check("keyboard-focus-visible", true);
