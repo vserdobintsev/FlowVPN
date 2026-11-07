@@ -14,8 +14,8 @@ internal static class ModuleChecks
         var definition = new ModuleDefinition("outline-transport", "1.0.0", "Outline", "Fixture", "flowvpn-outline-transport.exe",
             "https://github.com/vserdobintsev/FlowVPN/releases/download/outline-transport-v1.0.0/flowvpn-outline-transport.exe",
             bytes.Length, Convert.ToHexString(SHA256.HashData(bytes)), ["outline.ss-prefix.tcp.v1"]);
-        string fixture = Path.Combine(Path.GetTempPath(), "FlowVPN-module-checks-" + Guid.NewGuid().ToString("N"));
-        Directory.CreateDirectory(fixture);
+        var fixtureDirectory = Directory.CreateTempSubdirectory("FlowVPN-module-checks-");
+        string fixture = fixtureDirectory.FullName;
         using var handler = new TestHandler();
         using var client = new HttpClient(handler);
         ModuleManager Manager(string name, ModuleDefinition? item = null) => new(Path.Combine(fixture, name), new ModuleCatalog([item ?? definition]), client);
@@ -187,8 +187,8 @@ internal static class ModuleChecks
         }
         finally
         {
-            // fixture is a newly generated direct child of the OS temporary directory, never user application data.
-            Directory.Delete(fixture, true);
+            // Only the unique directory created for this run is eligible for cleanup.
+            fixtureDirectory.Delete(recursive: true);
         }
     }
 

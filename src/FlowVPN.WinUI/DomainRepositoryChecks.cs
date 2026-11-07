@@ -7,10 +7,9 @@ internal static class DomainRepositoryChecks
 {
     public static async Task Run(Action<bool, string> check)
     {
-        string fixture = Path.Combine(Path.GetTempPath(), "FlowVPN-domain-cache-" + Guid.NewGuid().ToString("N"));
+        var fixtureDirectory = Directory.CreateTempSubdirectory("FlowVPN-domain-cache-");
+        string fixture = fixtureDirectory.FullName;
         string rules = Path.Combine(fixture, "rules"), run = Path.Combine(fixture, "run"), archive = Path.Combine(fixture, "geosite.dat");
-        Directory.CreateDirectory(rules);
-        Directory.CreateDirectory(run);
         int compilations = 0;
         Task Compile(string input, string output, CancellationToken token)
         {
@@ -30,6 +29,8 @@ internal static class DomainRepositoryChecks
         }
         try
         {
+            Directory.CreateDirectory(rules);
+            Directory.CreateDirectory(run);
             byte[] original = Fixture(("ru-blocked", "alpha.example"), ("youtube", "video.example"), ("discord", "chat.example"));
             await File.WriteAllBytesAsync(archive, original);
             check(await Prepare(["ru-blocked"]), "First category preparation produces a usable cache");
@@ -141,7 +142,7 @@ internal static class DomainRepositoryChecks
                 "Cache pruning preserves the requested output, unrelated files and no compiler scratch data");
             check(File.Exists(protectedPath), "Pruning preserves the prior saved selection until the new settings are committed");
         }
-        finally { Directory.Delete(fixture, true); }
+        finally { fixtureDirectory.Delete(recursive: true); }
     }
 
     // Minimal genuine GeoSite protobuf fixture: entries contain one suffix each.
