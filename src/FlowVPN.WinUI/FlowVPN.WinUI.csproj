@@ -23,7 +23,7 @@
     <ApplicationManifest>app.manifest</ApplicationManifest>
     <ApplicationIcon>Assets/FlowVPN.ico</ApplicationIcon>
     <DefineConstants>$(DefineConstants);DISABLE_XAML_GENERATED_MAIN</DefineConstants>
-    <Version>1.5.1</Version>
+    <Version>1.5.2</Version>
     <FlowVPNPackageMode>Portable</FlowVPNPackageMode>
     <Authors>Владислав Сердобинцев</Authors>
     <PackageLicenseExpression>GPL-3.0-only</PackageLicenseExpression>

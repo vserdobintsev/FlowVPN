@@ -138,6 +138,7 @@ internal static class FeatureChecks
         AuditChecks.Run(Check);
         DomainRuleChecks.Run(Check);
         await DomainRepositoryChecks.Run(Check);
+        await BaseRulePreparationChecks.Run(Check);
         ProcessCatalogChecks.Run(Check);
         File.WriteAllText(Path.Combine(Store.Root, "design-preview", "feature-checks.json"), JsonSerializer.Serialize(new
         {

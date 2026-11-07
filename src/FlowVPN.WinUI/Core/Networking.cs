@@ -269,6 +269,19 @@ public sealed class VpnEngine : IDisposable
                 n.GetIPProperties().UnicastAddresses.Any(a => a.Address.AddressFamily == AddressFamily.InterNetwork && !a.Address.ToString().StartsWith("169.254.")));
             if (activeVpn)
                 throw new InvalidOperationException("Обнаружен другой активный VPN-адаптер. Отключите OpenVPN Connect / Outline перед запуском.");
+            if (settings.BaseRulesEnabled)
+            {
+                Set("Подготовка общей базы…");
+                bool preparing = true;
+                var progress = new Progress<TransferProgress>(value =>
+                {
+                    if (!preparing || token.IsCancellationRequested) return;
+                    string percent = value.TotalBytes is > 0 ? $" · {Math.Clamp(value.BytesReceived * 100d / value.TotalBytes.Value, 0, 100):0}%" : "";
+                    Set("Подготовка общей базы: " + value.Item + percent);
+                });
+                try { await BaseRulePreparation.Ensure(settings, token, progress); }
+                finally { preparing = false; }
+            }
             var selected = settings.Sources.FirstOrDefault(source => source.Id == profile.SourceId) ?? throw new InvalidOperationException("Выберите подключение.");
             if (selected.DynamicKey.Length > 0)
             {
