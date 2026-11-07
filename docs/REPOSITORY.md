@@ -15,7 +15,7 @@
 
 - Основная ветка — `main`. Изменения проходят через pull request и squash merge.
 - Заголовок PR становится заголовком коммита: английский Conventional Commit. Тело squash-коммита по умолчанию пустое (`BLANK`), поэтому русское описание PR не попадает в историю. Вручную добавленное тело тоже пишется на английском.
-- Обязательные проверки: `Build (Release)`, `Build (Preview)`, `Conventional title`. Для статусов закреплено приложение GitHub Actions, поэтому одноимённый статус другого приложения их не заменяет.
+- В плане защиты ветки указаны проверки `Build (Release)`, `Build (Preview)`, `Outline transport`, `Conventional title`. Для статусов закреплено приложение GitHub Actions, поэтому одноимённый статус другого приложения их не заменяет. После изменения списка примените план и проверьте фактический ruleset в GitHub.
 - Перед слиянием ветка должна соответствовать актуальной `main`, а обсуждения должны быть разрешены.
 - Force push и удаление `main` запрещены. Для тегов `v*` запрещены переписывание и удаление.
 - После слияния рабочая ветка удаляется автоматически. Долгоживущая `develop` не нужна.
@@ -26,7 +26,7 @@
 
 По умолчанию `GITHUB_TOKEN` имеет доступ только на чтение. Actions не могут одобрять PR. Разрешены официальные действия GitHub с закреплением по полному SHA. Дополнительные разрешения задаются явно в нужном job.
 
-Включаются Dependabot alerts и security updates, secret scanning, push protection и Private Vulnerability Reporting. Обновления GitHub Actions поступают отдельными PR через Dependabot; автоматического слияния нет. NuGet остаётся под locked restore и NuGet audit: обновление требует пересоздания lock-файла и проверки совместимости.
+Включаются Dependabot alerts и security updates, secret scanning, push protection и Private Vulnerability Reporting. Обновления GitHub Actions поступают отдельными PR через Dependabot; автоматического слияния нет. NuGet остаётся под locked restore и NuGet audit: обновление требует пересоздания lock-файла и проверки совместимости. Отдельный [еженедельный workflow](../.github/workflows/dependency-audit.yml) проверяет NuGet и закреплённые Go-зависимости транспорта Outline; ошибка получения базы уязвимостей не считается успешным аудитом.
 
 CodeQL включён в GitHub через **default setup**: язык C#, набор **Extended** (`extended` в API), модель угроз **`remote_and_local`**, еженедельный запуск. Его конфигурация хранится в настройках сервиса, поэтому отдельного CodeQL YAML в `.github/workflows` нет. Это не означает, что анализ выключен. Скрипт `Configure-Repository.ps1` не заменяет настройку CodeQL; при переносе проекта в другой репозиторий её необходимо включить и проверить отдельно. Снимок первого анализа и правила разбора результатов — в [SECURITY-REVIEW.md](SECURITY-REVIEW.md).
 
