@@ -297,13 +297,26 @@ internal sealed partial class FluentWindow : Window
             throw new InvalidOperationException("Подключение недоступно во время проверки сборки.");
         if (stagingUpdate)
             throw new Exception("Дождитесь подготовки обновления.");
-        await engine.Connect(settings, Profile, async (capability, token) =>
+        while (true)
         {
-            token.ThrowIfCancellationRequested();
-            bool available = await EnsureModuleAvailableAsync(capability);
-            token.ThrowIfCancellationRequested();
-            return available;
-        });
+            try
+            {
+                await engine.Connect(settings, Profile, async (capability, token) =>
+                {
+                    token.ThrowIfCancellationRequested();
+                    bool available = await EnsureModuleAvailableAsync(capability);
+                    token.ThrowIfCancellationRequested();
+                    return available;
+                });
+                break;
+            }
+            catch (DownloadInterruptedException error)
+            {
+                if (windowClosed || await Dialog("Загрузка прервалась", new TextBlock { Text = error.Message, TextWrapping = TextWrapping.Wrap, MaxWidth = 440 }, "Повторить") != ContentDialogResult.Primary)
+                    return;
+                if (windowClosed || Profile == null) return;
+            }
+        }
         if (windowClosed || !engine.Running)
             return;
         C<InfoBar>("PendingInfo").IsOpen = false;

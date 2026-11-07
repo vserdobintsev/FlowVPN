@@ -26,6 +26,9 @@ internal static class BaseRulePreparation
             if (missingIp) await prepareIp(token);
             if (missingDomains) await prepareDomains(token);
         }
+        catch (DownloadInterruptedException) { throw; }
+        catch (OperationCanceledException error) when (!token.IsCancellationRequested)
+        { throw new IOException("Сервер общей базы не ответил вовремя. Повторите подключение для продолжения загрузки.", error); }
         catch (OperationCanceledException) { throw; }
         catch (Exception error) when (error is IOException or HttpRequestException or InvalidOperationException)
         {

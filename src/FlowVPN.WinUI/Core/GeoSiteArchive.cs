@@ -13,7 +13,7 @@ public static class GeoSiteArchive
     public static async Task Update(HttpClient client, bool force, CancellationToken cancellationToken = default, IProgress<TransferProgress>? progress = null)
     {
         using var deadline = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-        deadline.CancelAfter(TimeSpan.FromSeconds(90));
+        deadline.CancelAfter(TimeSpan.FromMinutes(15));
         var token = deadline.Token;
         progress?.Report(new("Доменная база", TransferStage.Verifying));
         JsonObject? old = null;
@@ -42,7 +42,14 @@ public static class GeoSiteArchive
         string checksum = Encoding.UTF8.GetString(await BoundedHttp.Download(client, url + ".sha256sum", 4096, token, progress, "Контрольная сумма доменной базы")).Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries).FirstOrDefault() ?? "";
         if (!Regex.IsMatch(checksum, @"\A[a-fA-F0-9]{64}\z"))
             throw new InvalidDataException("Источник не вернул контрольную сумму GeoSite.");
-        byte[] bytes = await BoundedHttp.Download(client, url, 128 * 1024 * 1024, token, progress, "Доменная база");
+        byte[] bytes;
+        try
+        {
+            bytes = await ResumableDownload.Download(client, url, checksum, 128 * 1024 * 1024,
+                Path.Combine(Store.Data, "downloads"), token, progress, "Доменная база");
+        }
+        catch (OperationCanceledException error) when (!cancellationToken.IsCancellationRequested)
+        { throw new IOException("Истекло время загрузки доменной базы. Полученные данные сохранены; повторите попытку.", error); }
         progress?.Report(new("Доменная база", TransferStage.Verifying));
         string hash = Convert.ToHexString(SHA256.HashData(bytes));
         if (!hash.Equals(checksum, StringComparison.OrdinalIgnoreCase))

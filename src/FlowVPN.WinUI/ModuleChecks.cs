@@ -99,8 +99,8 @@ internal static class ModuleChecks
             try { await cancelManager.InstallAsync(definition.Id, token: canceled.Token); }
             catch (OperationCanceledException) { cancelObserved = true; }
             check(cancelObserved && cancelManager.DownloadProgress == null && (await cancelManager.GetStatusAsync(definition.Id)).State == ModuleState.Missing,
-                "Cancellation after streamed bytes closes and removes the partial download before returning");
-            check(!Directory.EnumerateFiles(fixture, "*.partial", SearchOption.AllDirectories).Any(), "Canceled and rejected installations leave no executable partials");
+                "Cancellation closes executable staging and leaves the module uninstalled while retaining resumable cache bytes");
+            check(!Directory.EnumerateFiles(fixture, "*.partial", SearchOption.AllDirectories).Any(), "Canceled and rejected installations leave no executable staging files");
 
             var requestStarted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
             var releaseRequest = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);

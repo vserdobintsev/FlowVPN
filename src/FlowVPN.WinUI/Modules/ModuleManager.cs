@@ -103,29 +103,14 @@ internal sealed class ModuleManager
             {
                 Report(0);
                 using var files = ModuleFiles.Open(Folder(definition), true);
-                using var response = await OpenDownload(definition.DownloadUrl, deadline.Token).ConfigureAwait(false);
-                if (response.Content.Headers.ContentLength is long length && length != definition.SizeBytes)
-                    throw new InvalidDataException("Размер загрузки не совпадает с каталогом модуля.");
-                await using var input = await response.Content.ReadAsStreamAsync(deadline.Token).ConfigureAwait(false);
-                using var temporary = files.CreateTemporary();
-                using var hash = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
-                byte[] buffer = new byte[64 * 1024];
-                long received = 0;
-                int lastPercent = -1;
-                while (true)
-                {
-                    int count = await input.ReadAsync(buffer, deadline.Token).ConfigureAwait(false);
-                    if (count == 0) break;
-                    received += count;
-                    if (received > definition.SizeBytes) throw new InvalidDataException("Загрузка превышает закреплённый размер модуля.");
-                    await temporary.Stream.WriteAsync(buffer.AsMemory(0, count), deadline.Token).ConfigureAwait(false);
-                    hash.AppendData(buffer, 0, count);
-                    int percent = (int)(received * 100 / definition.SizeBytes);
-                    if (percent != lastPercent) { Report(received); lastPercent = percent; }
-                }
+                byte[] bytes = await ResumableDownload.Download(client, definition.DownloadUrl, definition.Sha256,
+                    checked((int)definition.SizeBytes), Path.Combine(root, "downloads"), deadline.Token,
+                    new DownloadObserver(value => Report(value.BytesReceived)), definition.Name,
+                    definition.SizeBytes, ValidateDownloadUri).ConfigureAwait(false);
+                long received = bytes.Length;
                 Report(received, ModuleProgressStage.Verifying);
-                if (received != definition.SizeBytes || !Convert.ToHexString(hash.GetHashAndReset()).Equals(definition.Sha256, StringComparison.OrdinalIgnoreCase))
-                    throw new InvalidDataException("Модуль не прошёл проверку размера и SHA-256.");
+                using var temporary = files.CreateTemporary();
+                await temporary.Stream.WriteAsync(bytes, deadline.Token).ConfigureAwait(false);
                 deadline.Token.ThrowIfCancellationRequested();
                 Report(received, ModuleProgressStage.Installing);
                 deadline.Token.ThrowIfCancellationRequested();
@@ -196,28 +181,8 @@ internal sealed class ModuleManager
         finally { mutation.Release(); Notify(); }
     }
 
-    async Task<HttpResponseMessage> OpenDownload(string url, CancellationToken token)
-    {
-        var uri = new Uri(url);
-        for (int redirect = 0; redirect < 5; redirect++)
-        {
-            ValidateDownloadUri(uri);
-            var response = await client.GetAsync(uri, HttpCompletionOption.ResponseHeadersRead, token).ConfigureAwait(false);
-            try
-            {
-                if ((int)response.StatusCode is >= 300 and < 400 && response.Headers.Location is { } location)
-                {
-                    uri = new Uri(uri, location);
-                    response.Dispose();
-                    continue;
-                }
-                response.EnsureSuccessStatusCode();
-                return response;
-            }
-            catch { response.Dispose(); throw; }
-        }
-        throw new HttpRequestException("Слишком много перенаправлений при скачивании модуля.");
-    }
+    sealed class DownloadObserver(Action<TransferProgress> report) : IProgress<TransferProgress>
+    { public void Report(TransferProgress value) => report(value); }
     internal static void ValidateDownloadUri(Uri uri)
     {
         if (uri.Scheme != Uri.UriSchemeHttps || !uri.IsDefaultPort || uri.UserInfo.Length != 0 || uri.Fragment.Length != 0 ||
@@ -283,13 +248,13 @@ internal sealed class ModuleFiles : IDisposable
         using var handle = OpenChecked(Path.Combine(folder, name), false, deleteAccess: true);
         MarkDeleted(handle);
     }
-    internal static SafeFileHandle OpenChecked(string path, bool directory, bool deleteAccess = false, bool create = false)
+    internal static SafeFileHandle OpenChecked(string path, bool directory, bool deleteAccess = false, bool create = false, bool resume = false)
     {
         const uint readAttributes = 0x80, genericRead = 0x80000000, genericWrite = 0x40000000, delete = 0x10000;
         // READ_ATTRIBUTES alone does not participate in Windows share-access checks. LIST_DIRECTORY
         // makes FileShare.Read actually reject another writer capable of FSCTL_SET_REPARSE_POINT.
-        var handle = CreateFile(path, (directory ? readAttributes | 1u : genericRead) | (deleteAccess ? delete : 0) | (create ? genericWrite : 0),
-            FileShare.Read, IntPtr.Zero, create ? 1u : 3u, 0x00200000u | (directory ? 0x02000000u : 0), IntPtr.Zero);
+        var handle = CreateFile(path, (directory ? readAttributes | 1u : genericRead) | (deleteAccess ? delete : 0) | (create || resume ? genericWrite : 0),
+            FileShare.Read, IntPtr.Zero, resume ? 4u : create ? 1u : 3u, 0x00200000u | (directory ? 0x02000000u : 0), IntPtr.Zero);
         if (handle.IsInvalid)
         {
             int error = Marshal.GetLastWin32Error();
@@ -304,6 +269,8 @@ internal sealed class ModuleFiles : IDisposable
                 throw new IOException("Не удалось проверить путь модуля.", new Win32Exception(Marshal.GetLastWin32Error()));
             if ((info.Attributes & FileAttributes.ReparsePoint) != 0 || directory != ((info.Attributes & FileAttributes.Directory) != 0))
                 throw new InvalidDataException("Путь модуля не должен содержать ссылки или точки подключения.");
+            if (resume && (!GetStandardInformation(handle, 1, out var standard, (uint)Marshal.SizeOf<StandardInfo>()) || standard.NumberOfLinks != 1))
+                throw new InvalidDataException("Частичная загрузка не должна иметь жёстких ссылок.");
             return handle;
         }
         catch { handle.Dispose(); throw; }
@@ -348,6 +315,11 @@ internal sealed class ModuleFiles : IDisposable
         directories.Clear();
     }
     [StructLayout(LayoutKind.Sequential)] struct AttributeInfo { public FileAttributes Attributes; public uint ReparseTag; }
+    [StructLayout(LayoutKind.Sequential)] struct StandardInfo { public long AllocationSize, EndOfFile; public uint NumberOfLinks; public byte DeletePending, Directory; }
+    [DllImport("kernel32.dll", EntryPoint = "GetFileInformationByHandleEx", SetLastError = true)]
+    [DefaultDllImportSearchPaths(DllImportSearchPath.System32)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    static extern bool GetStandardInformation(SafeFileHandle handle, int informationClass, out StandardInfo info, uint size);
     [StructLayout(LayoutKind.Sequential)] struct IoStatusBlock { public IntPtr Status; public UIntPtr Information; }
     [DllImport("ntdll.dll")]
     [DefaultDllImportSearchPaths(DllImportSearchPath.System32)]

@@ -7,6 +7,7 @@ internal static class ModuleErrorText
     // Never display an exception's raw text: HTTP errors can contain URLs or proxy credentials.
     public static string Describe(Exception error) => error switch
     {
+        DownloadInterruptedException => "Не удалось завершить загрузку. Полученные данные сохранены. Нажмите «Повторить»: при поддержке сервера загрузка продолжится, иначе начнётся заново.",
         HttpRequestException { StatusCode: HttpStatusCode.NotFound or HttpStatusCode.Gone } => "Файл модуля пока недоступен на сервере выпуска. Повторите попытку позже или проверьте обновления FlowVPN.",
         HttpRequestException { StatusCode: HttpStatusCode.RequestTimeout or HttpStatusCode.GatewayTimeout } or TimeoutException or OperationCanceledException => "Сервер загрузки не ответил вовремя. Повторите попытку позже.",
         HttpRequestException { StatusCode: not null } => "Сервер выпуска не смог выдать файл модуля. Повторите попытку позже.",
