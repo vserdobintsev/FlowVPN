@@ -3,7 +3,7 @@ module github.com/vserdobintsev/FlowVPN/modules/outline-transport
 go 1.27.4
 
 require (
-	golang.getoutline.org/sdk v0.0.23
+	golang.getoutline.org/sdk v0.1.0
 	golang.org/x/sys v0.49.0
 )
 
