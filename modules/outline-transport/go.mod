@@ -4,7 +4,7 @@ go 1.27.4
 
 require (
 	golang.getoutline.org/sdk v0.0.23
-	golang.org/x/sys v0.49.0
+	golang.org/x/sys v0.50.0
 )
 
 require (
