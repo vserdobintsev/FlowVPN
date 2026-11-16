@@ -46,7 +46,7 @@ try {
     Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'licenses') -Destination $OutputDirectory -Recurse -Force
     $metadata = [ordered]@{
         Id = 'outline-transport'
-        Version = '1.0.0'
+        Version = '1.0.1'
         ProtocolVersion = 1
         Architecture = 'win-x64'
         Filename = 'flowvpn-outline-transport.exe'

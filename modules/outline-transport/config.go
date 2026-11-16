@@ -14,7 +14,7 @@ import (
 )
 
 const (
-	moduleVersion   = "1.0.0"
+	moduleVersion   = "1.0.1"
 	protocolVersion = 1
 	maxConfigBytes  = 1024 * 1024
 )
