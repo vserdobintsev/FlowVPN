@@ -2,7 +2,7 @@
 
 Нативный необязательный адаптер FlowVPN для Windows x64. Использует закреплённый Outline SDK, принимает аутентифицированный SOCKS5 на `127.0.0.1` и отправляет TCP/UDP через Shadowsocks. TUN, маршруты, системный DNS и настройки прокси не изменяет.
 
-**Статус:** [модуль 1.0.0 опубликован](https://github.com/vserdobintsev/FlowVPN/releases/tag/outline-transport-v1.0.0). Артефакт Windows x64 имеет размер 3 952 640 байт и SHA-256 `08df3ea4a8a0618db930609b1126f7827adcc3326c2557a5e8675948c1b41ad7`; эти значения закреплены в каталоге FlowVPN. Проверка скачивания из установленного приложения отложена. Работа через настоящий TUN и сервер провайдера, установка и обновление MSIX на чистой Windows требуют отдельной приёмки.
+**Статус:** 1.0.1 подготовлен к отдельному выпуску с Go 1.27.4, где исправлена [GO-2026-6859](https://pkg.go.dev/vuln/GO-2026-6859). Размер кандидата 3 953 152 байта, SHA-256 `c078d8f2befbc4f3da6de8e0a6c814115a450e1283827a36c233b67ebe56e0b2`. [Опубликованный модуль 1.0.0](https://github.com/vserdobintsev/FlowVPN/releases/tag/outline-transport-v1.0.0) собран с Go 1.27.3. Для перехода на 1.0.1 потребуется сборка FlowVPN с обновлённым каталогом.
 
 Выпуск включает [полный архив исходников](https://github.com/vserdobintsev/FlowVPN/releases/download/outline-transport-v1.0.0/flowvpn-outline-transport-1.0.0-source.zip) и [архив лицензий](https://github.com/vserdobintsev/FlowVPN/releases/download/outline-transport-v1.0.0/flowvpn-outline-transport-1.0.0-licenses.zip), а также `artifact.json`, `verification.json` и `SHA256SUMS.txt`. Автономная сборка полного комплекта исходников из коммита `c40a089` проверена. Результаты локальных проверок не заменяют испытания реального VPN.
 
